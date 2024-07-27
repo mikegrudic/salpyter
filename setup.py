@@ -1,4 +1,7 @@
-import setuptools, os
+"""Setup file for salpyter package"""
+
+import os
+import setuptools
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
