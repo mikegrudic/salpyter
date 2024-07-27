@@ -67,17 +67,17 @@ def chabrier_imf(logm, params):
     return imf / chabrier_imf_norm(params, logm.min(), logm.max())
 
 
-chabrier_default_params = (
+CHABRIER_DEFAULT_PARAMS = (
     np.log10(0.08),
     np.log(0.69),
     0.0,
     -1.3,
-)  # , -2, np.log10(120.0))
-chabrier_smooth_default_params = (
+)
+CHABRIER_SMOOTH_DEFAULT_PARAMS = (
     np.log10(0.08),
     np.log(0.69),
     -1.3,
-)  # , -2, np.log10(120.0))
+)
 
 
 def chabrier_smooth_imf(logm, params):
@@ -140,9 +140,8 @@ def imf_loglikelihood(params, masses, model="chabrier"):
 def test_chabrier_imf():
     mgrid = np.logspace(-3, np.log10(120.0), 100001)
     logm = np.log10(mgrid)
-    params = (
-        chabrier_default_params  # (np.log10(0.2), 0.7, -1.0, -2.0, np.log10(120.0))
-    )
+    params = CHABRIER_DEFAULT_PARAMS
+
     params = [-0.25999083, -0.69767731, -0.70363855]
     imf = chabrier_smooth_imf(logm, params)
     # chabrier_imf_norm(params)
