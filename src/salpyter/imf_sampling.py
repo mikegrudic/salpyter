@@ -3,13 +3,17 @@
 from .imfs import *
 
 
-def imf_samples(num_samples, imf, params, logmmin=-3, logmmax=2):
+def imf_samples(num_samples, imf, params=None, logmmin=-3, logmmax=2):
     """Uses rejection sampling to sample from an IMF"""
 
     if isinstance(imf, str):
         imf_function = get_imf_function(imf)
+        if params is None:
+            params = DEFAULT_IMF_PARAMS[imf]
     else:
         imf_function = imf
+        if params is None:
+            params = DEFAULT_IMF_PARAMS[imf.__name__]
 
     x = np.random.rand(num_samples)
     logm = logmmin + (logmmax - logmmin) * x
@@ -20,4 +24,7 @@ def imf_samples(num_samples, imf, params, logmmin=-3, logmmax=2):
 
 
 def get_imf_function(imf_name: str):
-    return locals()["imf_name"]()
+    """Returns the IMF function by name"""
+    if not "_imf" in imf_name:
+        imf_name = imf_name + "_imf"
+    return globals()[imf_name]

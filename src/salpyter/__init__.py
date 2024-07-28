@@ -1,3 +1,4 @@
-from .chabrier import *
+import numpy as np
+from .imfs import *
 from .imf_sampling import imf_samples
-from .imf_likelihood import imf_lnprob
+from .imf_likelihood import *

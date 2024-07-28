@@ -6,6 +6,14 @@ import numpy as np
 from scipy.special import erf
 from matplotlib import pyplot as plt
 
+CHABRIER_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), 0.0, -1.3)
+CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
+
+DEFAULT_IMF_PARAMS = {
+    "chabrier": CHABRIER_DEFAULT_PARAMS,
+    "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
+}
+
 
 def normal_left_integral(X1, X2):
     """Returns the integral of a normal distribution from X1 to X2"""
@@ -67,19 +75,6 @@ def chabrier_imf(logm, params):
     return imf / chabrier_imf_norm(params, logm.min(), logm.max())
 
 
-CHABRIER_DEFAULT_PARAMS = (
-    np.log10(0.08),
-    np.log(0.69),
-    0.0,
-    -1.3,
-)
-CHABRIER_SMOOTH_DEFAULT_PARAMS = (
-    np.log10(0.08),
-    np.log(0.69),
-    -1.3,
-)
-
-
 def chabrier_smooth_imf(logm, params):
     """Version of the Chabrier IMF constrained to have a smooth break between
     the lognormal and power-law parts"""
@@ -107,7 +102,7 @@ def chabrier_smooth_lognormal_peak_imf(logm, params, imf0=chabrier_smooth_imf):
 def test_chabrier_imf():
     mgrid = np.logspace(-3, np.log10(120.0), 100001)
     logm = np.log10(mgrid)
-    params = CHABRIER_DEFAULT_PARAMS
+    params = DEFAULT_IMF_PARAMS["chabrier"]
 
     params = [-0.25999083, -0.69767731, -0.70363855]
     imf = chabrier_smooth_imf(logm, params)
