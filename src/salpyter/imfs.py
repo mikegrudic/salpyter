@@ -12,6 +12,7 @@ CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
 DEFAULT_IMF_PARAMS = {
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
+    "chabrier_smooth_lognormal_peak": (np.log10(0.08), np.log(0.69), -1.3, 3, -2, 3, 1),
 }
 
 
