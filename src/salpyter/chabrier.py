@@ -103,40 +103,6 @@ def chabrier_smooth_lognormal_peak_imf(logm, params, imf0=chabrier_smooth_imf):
     imf = wt1 * imf1 + wt2 * imf2
     return imf
 
-
-def generate_samples_from_imf(num_samples, imf, params, logmmin=-3, logmmax=4):
-    """Uses rejection sampling to sample from an IMF"""
-    x = np.random.rand(num_samples)
-    logm = logmmin + (logmmax - logmmin) * x
-    imf_val = imf(logm, params)
-    imf_max = imf_val.max()
-    y = imf_max * np.random.rand(num_samples)
-    return 10 ** logm[y < imf_val]
-
-
-def imf_loglikelihood(params, masses, model="chabrier"):
-    """Computes the posterior likelihood of a given IMF model given
-    the stellar masses
-    """
-    logm = np.log10(masses)
-    match model.lower():
-        case "chabrier":
-            imf_func = chabrier_imf
-        case "chabrier_smooth":
-            imf_func = chabrier_smooth_imf
-        case "chabrier_smooth_lognormal":
-            imf_func = chabrier_smooth_lognormal_peak_imf
-        case _:
-            raise ValueError("IMF model not implemented!")
-
-    imf_val = imf_func(logm, params)
-    if np.any(imf_val <= 0):
-        return -np.inf
-    if not np.all(np.isfinite(np.log(imf_val))):
-        return -np.inf
-    return np.log(imf_val).sum()
-
-
 def test_chabrier_imf():
     mgrid = np.logspace(-3, np.log10(120.0), 100001)
     logm = np.log10(mgrid)
