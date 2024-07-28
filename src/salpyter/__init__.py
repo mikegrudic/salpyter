@@ -1,3 +1,3 @@
 from .chabrier import *
 from .imf_sampling import imf_samples
-from .imf_likelihood import 
+from .imf_likelihood import imf_lnprob
