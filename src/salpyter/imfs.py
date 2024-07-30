@@ -12,7 +12,8 @@ CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
 DEFAULT_IMF_PARAMS = {
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
-    "chabrier_smooth_lognormal_peak": (np.log10(0.08), np.log(0.69), -1.3, 3, -2, 3, 1),
+    "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2.5, -1.0, 3, 0.0),
+    # log_mmax1, log_fpeak, logm0_peak, logsigma_peak
 }
 
 
@@ -36,9 +37,7 @@ def chabrier_imf_norm(params, logmmin=0, logmmax=np.inf):
     logm0, logsigma, logmbreak, alpha = params
     sigma = np.exp(logsigma)
 
-    lognormal_norm = normal_left_integral(
-        (logmmin - logm0) / sigma, (logmbreak - logm0) / sigma
-    )
+    lognormal_norm = normal_left_integral((logmmin - logm0) / sigma, (logmbreak - logm0) / sigma)
 
     mbreak, mmax = 10**logmbreak, 10**logmmax
     if mmax < mbreak:
@@ -47,9 +46,7 @@ def chabrier_imf_norm(params, logmmin=0, logmmax=np.inf):
     powerlaw_norm = (
         normal(logmbreak, logm0, sigma)
         * mbreak**-alpha
-        * powerlaw_integral(
-            mbreak, mmax, alpha - 1
-        )  # alpha-1 because the measure is dlog10(m)
+        * powerlaw_integral(mbreak, mmax, alpha - 1)  # alpha-1 because the measure is dlog10(m)
         / np.log(10.0)
     )
     # print(sigma, logmmin, logmbreak, lognormal_norm, powerlaw_norm)
@@ -70,9 +67,7 @@ def chabrier_imf(logm, params):
     imf = normal(logm, logm0, sigma)
     m = 10**logm
     mbreak = 10**logmbreak
-    imf[logm > logmbreak] = (
-        normal(logmbreak, logm0, sigma) * (m[logm > logmbreak] / mbreak) ** alpha
-    )
+    imf[logm > logmbreak] = normal(logmbreak, logm0, sigma) * (m[logm > logmbreak] / mbreak) ** alpha
     return imf / chabrier_imf_norm(params, logm.min(), logm.max())
 
 
@@ -86,7 +81,7 @@ def chabrier_smooth_imf(logm, params):
     return chabrier_imf(logm, params_chabrier)
 
 
-def chabrier_smooth_lognormal_peak_imf(logm, params, imf0=chabrier_smooth_imf):
+def chabrier_smooth_lognormal_imf(logm, params, imf0=chabrier_smooth_imf):
     """Sum of any IMF and a lognormal peak"""
     params0 = params[:-4]
     log_mmax1, log_fpeak, logm0_peak, logsigma_peak = params[-4:]
