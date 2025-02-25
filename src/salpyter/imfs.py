@@ -12,12 +12,13 @@ CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
 DEFAULT_IMF_PARAMS = {
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
-    "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2.5, -1.0, 3, 0.0),
+    # "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2.5, -1.0, 3, 0.0),
     # log_mmax1, log_fpeak, logm0_peak, logsigma_peak
+    "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, -1.0, 3, 0.0),
 }
 
 
-def normal_left_integral(X1, X2):
+def normal_cdf(X1, X2):
     """Returns the integral of a normal distribution from X1 to X2"""
     integral = 0.5 * (1 + erf(X2 / np.sqrt(2)))
     if X2 > 0:
@@ -25,9 +26,15 @@ def normal_left_integral(X1, X2):
     return integral
 
 
-def normal(x, mu, sigma):
+def normal(x, mu, sigma, xmin=-np.inf, xmax=np.inf):
     """Returns the value of the normal distribution"""
-    return (2 * np.pi) ** -0.5 / sigma * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+    funcval = (2 * np.pi) ** -0.5 / sigma * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+    # print(xmin, xmax)
+    if xmin > -np.inf or xmax < np.inf:
+        # print("normal")
+        # print(xmin, mu, xmax, sigma, normal_cdf(xmin - mu, xmax - mu))
+        funcval /= normal_cdf(xmin - mu, xmax - mu)
+    return funcval
 
 
 def chabrier_imf_norm(params, logmmin=0, logmmax=np.inf):
@@ -37,7 +44,7 @@ def chabrier_imf_norm(params, logmmin=0, logmmax=np.inf):
     logm0, logsigma, logmbreak, alpha = params
     sigma = np.exp(logsigma)
 
-    lognormal_norm = normal_left_integral((logmmin - logm0) / sigma, (logmbreak - logm0) / sigma)
+    lognormal_norm = normal_cdf((logmmin - logm0) / sigma, (logmbreak - logm0) / sigma)
 
     mbreak, mmax = 10**logmbreak, 10**logmmax
     if mmax < mbreak:
@@ -83,14 +90,18 @@ def chabrier_smooth_imf(logm, params):
 
 def chabrier_smooth_lognormal_imf(logm, params, imf0=chabrier_smooth_imf):
     """Sum of any IMF and a lognormal peak"""
-    params0 = params[:-4]
-    log_mmax1, log_fpeak, logm0_peak, logsigma_peak = params[-4:]
+    # params0 = params[:-4]
+    # log_mmax1, log_fpeak, logm0_peak, logsigma_peak = params[-4:]
+    params0 = params[:-3]
+    log_fpeak, logm0_peak, logsigma_peak = params[-3:]
 
-    imf1 = imf0(logm.clip(-np.inf, log_mmax1), params0) * (logm < log_mmax1)
-    imf2 = normal(logm, logm0_peak, np.exp(logsigma_peak))
+    # imf1 = imf0(logm.clip(-np.inf, log_mmax1), params0) * (logm < log_mmax1)
+    imf1 = imf0(logm, params0)
+    imf2 = normal(logm, logm0_peak, np.exp(logsigma_peak), xmin=logm.min(), xmax=logm.max())
     wt = np.exp(log_fpeak)
     wt1 = 1 / (1 + wt)
     wt2 = 1 - wt1
+    # print(wt1, wt2)
     imf = wt1 * imf1 + wt2 * imf2
     return imf
 

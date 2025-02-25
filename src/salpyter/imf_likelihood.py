@@ -72,8 +72,8 @@ def imf_lnprob_samples(masses, model="chabrier", p0=None, bounds=None, nwalkers=
         raise (ValueError("lnprob is negative infinity at p0 - find a better guess."))
 
     nwalkers, ndim = 100, len(p0)
-    p0 = np.array(p0) * np.exp(0.01 * np.random.normal(size=(nwalkers, ndim)))
-
+    p0 = np.array(p0) + 0.01 * np.random.normal(size=(nwalkers, ndim))
+    # print(p0)
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob)
     state = sampler.run_mcmc(p0, chainlength // 10)
     sampler.reset()
