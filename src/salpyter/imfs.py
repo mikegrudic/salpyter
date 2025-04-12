@@ -4,7 +4,6 @@ Routines for analyzing the IMF data from the simulations
 
 import numpy as np
 from scipy.special import erf
-from matplotlib import pyplot as plt
 
 CHABRIER_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3, 0.0)
 CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
@@ -12,11 +11,8 @@ CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
 DEFAULT_IMF_PARAMS = {
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
-    # "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2.5, -1.0, 3, 0.0),
-    # log_fpeak, logm0_peak, logsigma_peak
     "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, -1.0, 3, 0.0),
     "chabrier_smooth_cutoff_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2, -1.0, 3, 0.0),
-    # "chabrier_smooth_cutoff_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2, -1.0, 3, 0.0),
 }
 
 

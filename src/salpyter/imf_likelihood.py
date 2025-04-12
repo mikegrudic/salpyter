@@ -1,7 +1,7 @@
 """Function to evaluate the log-likelihood of a certain IMF given a set of samples"""
 
 import numpy as np
-from . import imfs  # from .imfs import chabrier_imf, chabrier_smooth_imf, chabrier_smooth_lognormal_imf
+from . import imfs
 from scipy.optimize import minimize
 import emcee
 
