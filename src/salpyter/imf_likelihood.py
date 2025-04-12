@@ -1,7 +1,7 @@
 """Function to evaluate the log-likelihood of a certain IMF given a set of samples"""
 
 import numpy as np
-from .imfs import *
+from . import imfs  # from .imfs import chabrier_imf, chabrier_smooth_imf, chabrier_smooth_lognormal_imf
 from scipy.optimize import minimize
 import emcee
 
@@ -11,17 +11,10 @@ def imf_lnprob(params, masses, model="chabrier"):
     the stellar masses
     """
     logm = np.log10(masses)
-    match model.lower():
-        case "chabrier":
-            imf_func = chabrier_imf
-        case "chabrier_smooth":
-            imf_func = chabrier_smooth_imf
-        case "chabrier_smooth_lognormal":
-            imf_func = chabrier_smooth_lognormal_imf
-        case _:
-            raise ValueError("IMF model not implemented!")
 
-    imf_val = imf_func(logm, params)
+    imf_func = getattr(imfs, model.lower() + "_imf")
+
+    imf_val = imf_func(logm, params, logmmin=logm.min(), logmmax=logm.max())
     if np.any(imf_val <= 0):
         return -np.inf
     if not np.all(np.isfinite(np.log(imf_val))):
@@ -31,22 +24,26 @@ def imf_lnprob(params, masses, model="chabrier"):
 
 def imf_default_params(model="chabrier"):
     """Convenience method to access default IMF parameters"""
-    return DEFAULT_IMF_PARAMS[model]
+    return imfs.DEFAULT_IMF_PARAMS[model]
 
 
 def imf_mostlikely_params(masses, model="chabrier", bounds=None, p0=None):
     """Return the most likely IMF parameters"""
     if p0 is None:
-        p0 = DEFAULT_IMF_PARAMS[model]
+        p0 = list(imfs.DEFAULT_IMF_PARAMS[model])
+
+    if "chabrier" in model and "smooth" not in model:
+        # start by fitting the simplest model and using those parameters in the guess for the
+        # more-complex model
+        p0[:3] = imf_mostlikely_params(
+            masses, "chabrier_smooth", (bounds[:3] if bounds is not None else None), p0[:3]
+        ).x
 
     def lossfunc(p):
         return -imf_lnprob(p, masses, model)
 
     sol = minimize(lossfunc, p0, bounds=bounds, method="Nelder-Mead")
-    # if sol.success:
     return sol
-    # else:
-    # raise (ValueError("Could not successfully maximize IMF likelihood"))
 
 
 def imf_lnprob_samples(masses, model="chabrier", p0=None, bounds=None, nwalkers=100, chainlength=1000):
@@ -68,12 +65,16 @@ def imf_lnprob_samples(masses, model="chabrier", p0=None, bounds=None, nwalkers=
         p0 = imf_mostlikely_params(masses, model).x
         if lnprob(p0) == -np.inf:
             p0 = imf_default_params(model)
+
+    for i, b in enumerate(bounds):
+        p0[i] = p0[i].clip(b[0], b[1])
+
     if lnprob(p0) == -np.inf:
         raise (ValueError("lnprob is negative infinity at p0 - find a better guess."))
 
     nwalkers, ndim = 100, len(p0)
     p0 = np.array(p0) + 0.01 * np.random.normal(size=(nwalkers, ndim))
-    # print(p0)
+
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob)
     state = sampler.run_mcmc(p0, chainlength // 10)
     sampler.reset()
