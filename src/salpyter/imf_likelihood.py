@@ -42,6 +42,9 @@ def imf_mostlikely_params(masses, model="chabrier", bounds=None, p0=None):
     def lossfunc(p):
         return -imf_lnprob(p, masses, model)
 
+    if bounds is None:
+        bounds = imfs.DEFAULT_IMF_PARAMS_BOUNDS[model]
+
     sol = minimize(lossfunc, p0, bounds=bounds, method="Nelder-Mead")
     return sol
 
@@ -51,7 +54,8 @@ def imf_lnprob_samples(masses, model="chabrier", p0=None, bounds=None, nwalkers=
 
     ndim = len(imf_default_params(model))
     if bounds is None:
-        bounds = np.c_[ndim * [-np.inf], ndim * [np.inf]]
+        bounds = bounds = imfs.DEFAULT_IMF_PARAMS_BOUNDS[model]
+
     bounds = np.array(bounds)
 
     def lnprob(params):
@@ -61,12 +65,12 @@ def imf_lnprob_samples(masses, model="chabrier", p0=None, bounds=None, nwalkers=
             return -np.inf
         return imf_lnprob(params, masses, model)
 
-    if p0 is None:
+    if p0 is None:  # initial guess
         p0 = imf_mostlikely_params(masses, model).x
         if lnprob(p0) == -np.inf:
             p0 = imf_default_params(model)
 
-    for i, b in enumerate(bounds):
+    for i, b in enumerate(bounds):  # clip to bounds
         p0[i] = p0[i].clip(b[0], b[1])
 
     if lnprob(p0) == -np.inf:

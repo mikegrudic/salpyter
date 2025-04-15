@@ -3,12 +3,13 @@ Routines for analyzing the IMF data from the simulations
 """
 
 import numpy as np
-from scipy.special import erf
+from .norm_functions import powerlaw_integral, chabrier_imf_norm, normal
 
-CHABRIER_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3, 0.0)
-CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)
+CHABRIER_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3, 0.0)  # log mc, log sigma, high-mass slope, log m_break
+CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)  # log mc, log sigma, high-mass slope
 
 DEFAULT_IMF_PARAMS = {
+    "powerlaw": (-1.3,),
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
     "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, -1.0, 3, 0.0),
@@ -16,51 +17,49 @@ DEFAULT_IMF_PARAMS = {
 }
 
 
-def normal_cdf(X1, X2):
-    """Returns the integral of a normal distribution from X1 to X2"""
-    integral = 0.5 * (1 + erf(X2 / np.sqrt(2)))
-    if X1 > -np.inf:
-        integral -= 0.5 * (1 + erf(X1 / np.sqrt(2)))
-    return integral
+DEFAULT_IMF_PARAMS_BOUNDS = {
+    # log mc, log sigma, high-mass slope
+    "chabrier_smooth": [[-2, 2], [-2, 1], [-10, 10]],
+    "powerlaw": [[-10, 10]],
+}
+
+p0 = DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth"]
+# + log m_break
+DEFAULT_IMF_PARAMS_BOUNDS["chabrier"] = p0 + [[-3, 3]]
+# + fraction in lognormal part, log mc of lognormal part, log sigma of lognormal part
+DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_lognormal"] = p0 + [[-10, 6], [-1, 4], [-2, 1]]
+# + high-mass cutoff of lognormal part, fraction in lognormal part, log mc of lognormal part, log sigma of lognormal part
+DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_cutoff_lognormal"] = p0 + [[0, 4], [-10, 6], [-1, 4], [-2, 1]]
 
 
-def normal(x, mu, sigma, xmin=-np.inf, xmax=np.inf):
-    """Returns the value of the normal distribution"""
-    funcval = (2 * np.pi) ** -0.5 / sigma * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
-    # print(xmin, xmax)
-    if xmin > -np.inf or xmax < np.inf:
-        # print("normal")
-        # print(xmin, mu, xmax, sigma, normal_cdf(xmin - mu, xmax - mu))
-        funcval /= normal_cdf((xmin - mu) / sigma, (xmax - mu) / sigma)
-    return funcval
+def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
+    """Simple single-power-law (i.e. Salpeter) IMF"""
+    slope = params[0]  # -1.35 = salpeter
+    mmin, mmax = 10**logmmin, 10**logmmax
+    norm = powerlaw_integral(mmin, mmax, slope - 1) / np.log(10)  # slope-1 and log10 to convert from m to logm function
+    m = 10**logm
+    return m**slope / norm
 
 
-def chabrier_imf_norm(params, logmmin=-np.inf, logmmax=2):
-    """Returns the integral of a Chabrier IMF with the given parameters - assumes
-    the lognormal part is already normalized"""
-    logm0, logsigma, alpha, logmbreak = params
-    sigma = np.exp(logsigma)
+# def piecewise_powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
+#     """Piecewise-power-law (e.g. Scalo, Kroupa) IMF"""
+#     if len(params) == 1:
+#         return powerlaw_imf(logm, params, logmmin, logmmax)
 
-    lognormal_norm = normal_cdf((logmmin - logm0) / sigma, (logmbreak - logm0) / sigma)
+#     if len(params) % 2 == 0:
+#         raise ValueError("Piecewise power-law IMF must have an odd number of parameters.")
+#     slopes = params[::2]  # parameters: slope 1, logm12, slope2, logm23, ... slopeN
+#     mbreaks = params[1::2]
+#     mmin, mmax = 10**logmmin, 10**logmmax
+#     norm = 0
 
-    mbreak, mmax = 10**logmbreak, 10**logmmax
-    if mmax < mbreak:
-        mbreak = mmax
+#     imf_value = np.heaviside(logm - logmmin) * np.heaviside(logmmax - logm)
+#     for i, s in enumerate(slopes):  # loop over segments
+#         norm += powerlaw_integral(mmin, mmax, s - 1) / np.log(10)
+#         imf_value *= np.heaviside
 
-    powerlaw_norm = (
-        normal(logmbreak, logm0, sigma)
-        * mbreak**-alpha
-        * powerlaw_integral(mbreak, mmax, alpha - 1)  # alpha-1 because the measure is dlog10(m)
-        / np.log(10.0)
-    )
-    return lognormal_norm + powerlaw_norm
-
-
-def powerlaw_integral(xmin, xmax, alpha):
-    """Returns the integral of x^alpha from xmin to xmax"""
-    if alpha == -1:
-        return np.log(xmax / xmin)
-    return (xmax ** (1 + alpha) - xmin ** (1 + alpha)) / (1 + alpha)
+#     m = 10**logm
+#     return m**slope / norm
 
 
 def chabrier_imf(logm, params, logmmin=-np.inf, logmmax=4):
