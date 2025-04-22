@@ -5,22 +5,24 @@ Routines for analyzing the IMF data from the simulations
 import numpy as np
 from .norm_functions import powerlaw_integral, chabrier_imf_norm, normal
 
-CHABRIER_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3, 0.0)  # log mc, log sigma, high-mass slope, log m_break
-CHABRIER_SMOOTH_DEFAULT_PARAMS = (np.log10(0.08), np.log(0.69), -1.3)  # log mc, log sigma, high-mass slope
+CHABRIER_DEFAULT_PARAMS = [np.log10(0.25), np.log(0.55), -1.3, 0.0]  # log mc, log sigma, high-mass slope, log m_break
+CHABRIER_SMOOTH_DEFAULT_PARAMS = [np.log10(0.25), np.log(0.55), -1.3]  # log mc, log sigma, high-mass slope
 
 DEFAULT_IMF_PARAMS = {
-    "powerlaw": (-1.3,),
+    "powerlaw": [-1.3],
+    "powerlaw_mmax": [-1.3, 4],
     "chabrier": CHABRIER_DEFAULT_PARAMS,
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
-    "chabrier_smooth_lognormal": (np.log10(0.08), np.log(0.69), -1.0, -1.0, 3, 0.0),
-    "chabrier_smooth_cutoff_lognormal": (np.log10(0.08), np.log(0.69), -1.0, 2, -1.0, 3, 0.0),
+    "chabrier_smooth_lognormal": [np.log10(0.08), np.log(0.69), -1.0, -1.0, 3, 0.0],
+    "chabrier_smooth_cutoff_lognormal": [np.log10(0.08), np.log(0.69), -1.0, 2, -1.0, 3, 0.0],
 }
 
 
 DEFAULT_IMF_PARAMS_BOUNDS = {
     # log mc, log sigma, high-mass slope
-    "chabrier_smooth": [[-2, 2], [-2, 1], [-10, 10]],
-    "powerlaw": [[-10, 10]],
+    "chabrier_smooth": [[-2, 2], [-2, 2], [-10, 2]],
+    "powerlaw": [[-10, 2]],
+    "powerlaw_mmax": [[-10, 2], [-2, 4]],
 }
 
 p0 = DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth"]
@@ -32,13 +34,28 @@ DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_lognormal"] = p0 + [[-10, 6], [-1, 4]
 DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_cutoff_lognormal"] = p0 + [[0, 4], [-10, 6], [-1, 4], [-2, 1]]
 
 
-def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """Simple single-power-law (i.e. Salpeter) IMF"""
+def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=None):
+    """Simple single-power-law (i.e. Salpeter) IMF allowing the maximum mass to be a free parameter"""
     slope = params[0]  # -1.35 = salpeter
     mmin, mmax = 10**logmmin, 10**logmmax
     norm = powerlaw_integral(mmin, mmax, slope - 1) / np.log(10)  # slope-1 and log10 to convert from m to logm function
     m = 10**logm
-    return m**slope / norm
+    imf = m**slope / norm
+    imf[(m > mmax) ^ (m < mmin)] = 0.0
+    return imf
+
+
+def powerlaw_bounds_imf(logm, params, logmmin=-np.inf, logmmax=4):
+    """Single power law with fixed max and min mass"""
+    return imf_with_bounds_params(logm, params, powerlaw_imf)
+
+
+def imf_with_bounds_params(logm, params, imf0=powerlaw_imf):
+    """IMF that adds lower and upper bounds to an IMF as the last 2 parameters"""
+    logmmin, logmmax = params[-2:]
+    imf = imf0(logm, params[:-2], logmmin, logmmax)
+    imf[(logm > logmmax) ^ (logm < logmmin)] = 0.0
+    return imf
 
 
 # def piecewise_powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
@@ -49,14 +66,18 @@ def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
 #     if len(params) % 2 == 0:
 #         raise ValueError("Piecewise power-law IMF must have an odd number of parameters.")
 #     slopes = params[::2]  # parameters: slope 1, logm12, slope2, logm23, ... slopeN
-#     mbreaks = params[1::2]
+#     logmbreaks = params[1::2]  # segment break masses
 #     mmin, mmax = 10**logmmin, 10**logmmax
 #     norm = 0
 
-#     imf_value = np.heaviside(logm - logmmin) * np.heaviside(logmmax - logm)
+#     #    imf_value = np.heaviside(logm - logmmin) * np.heaviside(logmmax - logm)
+#     imf_value = np.ones_like(logm)
+#     m0 = 1.0
 #     for i, s in enumerate(slopes):  # loop over segments
-#         norm += powerlaw_integral(mmin, mmax, s - 1) / np.log(10)
-#         imf_value *= np.heaviside
+#         if logmbreaks[i]
+#         #norm += powerlaw_integral(mmin, mmax, s - 1) / np.log(10)
+
+#         # imf_value *= np.heaviside
 
 #     m = 10**logm
 #     return m**slope / norm
@@ -67,10 +88,28 @@ def chabrier_imf(logm, params, logmmin=-np.inf, logmmax=4):
     logm0, logsigma, alpha, logmbreak = params
     sigma = np.exp(logsigma)
     imf = normal(logm, logm0, sigma)
-    m = 10**logm
-    mbreak = 10**logmbreak
+
+    m, mbreak = 10**logm, 10**logmbreak
     imf[logm > logmbreak] = normal(logmbreak, logm0, sigma) * (m[logm > logmbreak] / mbreak) ** alpha
-    return imf / chabrier_imf_norm(params, logmmin, logmmax)
+    norm = chabrier_imf_norm(params, logmmin, logmmax)
+
+    # logmgrid = np.linspace(logmmin, logmmax, 10000)
+    # imf2 = normal(logmgrid, logm0, sigma)
+    # imf2[logmgrid > logmbreak] = (
+    #     normal(logmbreak, logm0, sigma) * ((10**logmgrid)[logmgrid > logmbreak] / mbreak) ** alpha
+    # )
+    # norm2 = np.trapz(imf2, logmgrid)
+
+    # if np.abs(np.log10(norm / norm2)) > 0.01:
+    #     print(params, norm, norm2)
+    #     from matplotlib import pyplot as plt
+
+    #     plt.plot(logmgrid, imf2)
+    #     plt.yscale("log")
+    #     plt.savefig("imf.png")
+    #     exit()
+
+    return imf / norm  # chabrier_imf_norm(params, logmmin, logmmax)
 
 
 def chabrier_smooth_imf(logm, params, logmmin=-np.inf, logmmax=4):
