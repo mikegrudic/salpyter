@@ -4,12 +4,13 @@ import numpy as np
 from . import imfs
 from scipy.optimize import minimize
 import emcee
+from .default_imf_params import *
 
 DEFAULT_LOGMMIN = -2
 DEFAULT_LOGMMAX = 4
 
 
-def imf_lnprob(params, masses, model="chabrier", logmmin=None, logmmax=None):
+def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):
     """Computes the posterior likelihood of a given IMF model given
     the stellar masses
     """
@@ -30,29 +31,7 @@ def imf_lnprob(params, masses, model="chabrier", logmmin=None, logmmax=None):
     return np.log(imf_val).sum()
 
 
-def imf_default_params(model="chabrier"):
-    """Convenience method to access default IMF parameters"""
-
-    if "_bounds" in model:  # 'imf + upper and lower bounds' model
-        params = imfs.DEFAULT_IMF_PARAMS[model.replace("_bounds", "")] + [DEFAULT_LOGMMIN, DEFAULT_LOGMMAX]
-        #
-    else:
-        params = imfs.DEFAULT_IMF_PARAMS[model]
-    return params
-
-
-def imf_default_bounds(model="chabrier"):
-    """Convenience method to access default IMF parameters"""
-
-    if "_bounds" in model:  # 'imf + upper and lower bounds' model
-        bounds = imfs.DEFAULT_IMF_PARAMS_BOUNDS[model.replace("_bounds", "")] + [[-4, 4], [-4, 4]]
-        # print(bounds)
-    else:
-        bounds = imfs.DEFAULT_IMF_PARAMS_BOUNDS[model]
-    return bounds
-
-
-def imf_mostlikely_params(masses, model="chabrier", bounds=None, p0=None):
+def imf_mostlikely_params(masses, model=DEFAULT_MODEL, bounds=None, p0=None):
     """Return the most likely IMF parameters"""
     if p0 is None:
         p0 = list(imf_default_params(model))
@@ -75,7 +54,7 @@ def imf_mostlikely_params(masses, model="chabrier", bounds=None, p0=None):
 
 
 def imf_lnprob_samples(
-    masses, model="chabrier", p0=None, bounds=None, nwalkers=100, chainlength=1000, logmmin=None, logmmax=None
+    masses, model=DEFAULT_MODEL, p0=None, bounds=None, nwalkers=100, chainlength=1000, logmmin=None, logmmax=None
 ):
     """Returns samples from the likelihood distribution of IMF parameters"""
 
