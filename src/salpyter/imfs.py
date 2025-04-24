@@ -8,18 +8,53 @@ from .default_imf_params import *
 
 
 def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=None):
-    """Simple single-power-law (i.e. Salpeter) IMF allowing the maximum mass to be a free parameter"""
+    """
+    Simple single-power-law (e.g. Salpeter) IMF
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (1,) array-like containing the IMF slope (Salpeter value = -1.35)
+    logmmin: float, optional
+        Low-mass cutoff
+    logmmax: float, optional
+        High-mass cutoff
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     slope = params[0]  # -1.35 = salpeter
     mmin, mmax = 10**logmmin, 10**logmmax
     norm = powerlaw_integral(mmin, mmax, slope - 1) / np.log(10)  # slope-1 and log10 to convert from m to logm function
     m = 10**logm
     imf = m**slope / norm
-    imf[(m > mmax) ^ (m < mmin)] = 0.0
+    imf[(m > mmax * (1 + 1e-15)) ^ (m < (1 - 1e-15) * mmin)] = 0.0
     return imf
 
 
 def imf_with_bounds_params(logm, params, imf0=powerlaw_imf):
-    """IMF that adds lower and upper bounds to an IMF as the last 2 parameters"""
+    """
+    Given another base IMF model, implements an IMF that adds lower and upper bounds as the last 2 additional parameters
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (n_params+2,) array where the initial parameters are for the base IMF and the  last 2  are the low- and
+        high-mass cutoff
+    imf0: function, optional
+        function implmenting the base IMF
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     logmmin, logmmax = params[-2:]
     imf = imf0(logm, params[:-2], logmmin, logmmax)
     imf[(logm > logmmax) ^ (logm < logmmin)] = 0.0
@@ -52,7 +87,24 @@ def imf_with_bounds_params(logm, params, imf0=powerlaw_imf):
 
 
 def chabrier_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """Returns the value of the Chabrier IMF form as a distribution in log m"""
+    """Returns the value of the Chabrier IMF form as a distribution in log m
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (4,) array of parameters: [log m_peak, log sigma, slope, log m_break]
+    logmmin: float, optional
+        Low-mass cutoff
+    logmmax: float, optional
+        High-mass cutoff
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     logm0, logsigma, alpha, logmbreak = params
     sigma = np.exp(logsigma)
     imf = normal(logm, logm0, sigma)
@@ -65,8 +117,26 @@ def chabrier_imf(logm, params, logmmin=-np.inf, logmmax=4):
 
 
 def chabrier_smooth_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """Version of the Chabrier IMF constrained to have a smooth break between
-    the lognormal and power-law parts"""
+    """
+    Chabrier IMF constrained to have a smooth break between the lognormal and power-law part
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (3,) array of parameters: [log m_peak, log sigma, slope]
+    logmmin: float, optional
+        Low-mass cutoff
+    logmmax: float, optional
+        High-mass cutoff
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
+
     logm0, logsigma, alpha = params
     sigma = np.exp(logsigma)
     logmbreak = logm0 - alpha * sigma * sigma * np.log(10.0)  # condition for smooth transition
@@ -75,7 +145,35 @@ def chabrier_smooth_imf(logm, params, logmmin=-np.inf, logmmax=4):
 
 
 def imf_plus_lognormal(logm, params, imf0=chabrier_smooth_imf, logmmin=-np.inf, logmmax=4, cutoff=False):
-    """Sum of any IMF and a lognormal peak"""
+    """Sum of any IMF and a lognormal peak
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (n_params,) array of parameters. The first values will be the parameters of the base IMF.  If cutoff is
+        True, the last 3 parameters specify:
+          1. The high-mass cutoff of the original IMF
+          2. the log of the fraction of stars in the lognormal component,
+          3. the log of the lognormal's peak mass
+          4. the log of the lognormal's sigma
+        If cutoff is False, the high-mass cutoff parameter above is omitted.
+    imf0: function, optional
+        IMF function for the base IMF
+    logmmin: float, optional
+        low-mass cutoff
+    logmmax: float, optional
+        high-mass cutoff
+    cutoff: boolean, optional
+        Whether to include a high-mass cutoff for the base IMF in the parameters
+
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     xmin, xmax = logmmin, logmmax
     if cutoff:
         params0 = params[:-4]
@@ -97,8 +195,45 @@ def imf_plus_lognormal(logm, params, imf0=chabrier_smooth_imf, logmmin=-np.inf, 
 
 
 def chabrier_smooth_lognormal_imf(logm, params, logmmin=-np.inf, logmmax=4):
+    """
+    IMF consisting of a chabrier_smooth IMF component plus a lognormal component
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (6,) array of parameters: [log m_peak, log sigma, slope, log f_peak, log m_peak, log sigma_peak]
+    logmmin: float, optional
+        Low-mass cutoff
+    logmmax: float, optional
+        High-mass cutoff
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     return imf_plus_lognormal(logm, params, chabrier_smooth_imf, logmmin, logmmax)
 
 
 def chabrier_smooth_cutoff_lognormal_imf(logm, params, logmmin=-np.inf, logmmax=4):
+    """IMF consisting of a chabrier_smooth IMF component *with a sharp high-mass cutoff* plus a lognormal component
+
+    Parameters
+    ----------
+    logm: array_like
+        Array of log10(mass) values at which to evaluate the IMF
+    params: array_like
+        Shape (7,) array of parameters: [log m_peak, log sigma, slope, log mmax, log f_peak, log m_peak, log sigma_peak]
+    logmmin: float, optional
+        Low-mass cutoff
+    logmmax: float, optional
+        High-mass cutoff
+
+    Returns
+    -------
+    imf: array-like
+        Value of the IMF normalized to integrate over logm
+    """
     return imf_plus_lognormal(logm, params, chabrier_smooth_imf, logmmin, logmmax, cutoff=True)
