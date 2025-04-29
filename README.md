@@ -1,3 +1,12 @@
+# salpyter
+
+[![Documentation Status](https://readthedocs.org/projects/salpyter/badge/?version=latest)](https://salpyter.readthedocs.io/en/latest/?badge=latest)
+
+salpyter implements routines for computing and fitting to parametric forms for the stellar initial mass function, and performing Bayesians statistical inference of IMF parameters from data.
+
+## Quickstart
+
+
 ```python
 %pylab
 %matplotlib inline
@@ -73,7 +82,7 @@ ax.set(yscale="log",
 
 
     
-![png](quickstart_files/quickstart_6_1.png)
+![png](quickstart_files/quickstart_8_1.png)
     
 
 
@@ -107,7 +116,7 @@ ax.set(yscale="log",
 
 
     
-![png](quickstart_files/quickstart_8_1.png)
+![png](quickstart_files/quickstart_10_1.png)
     
 
 
@@ -152,7 +161,7 @@ ax.set(yscale="log",
 
 
     
-![png](quickstart_files/quickstart_10_1.png)
+![png](quickstart_files/quickstart_12_1.png)
     
 
 
@@ -179,6 +188,6 @@ plt.ylabel(r"$\mathcal{P}(\alpha)$")
 
 
     
-![png](quickstart_files/quickstart_12_1.png)
+![png](quickstart_files/quickstart_14_1.png)
     
 
