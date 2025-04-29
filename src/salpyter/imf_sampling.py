@@ -66,7 +66,6 @@ def imf_rejection_samples(num_samples: int, imf: Callable | str, params=None, lo
     samples = np.empty(0)
     N = num_samples
     while len(samples) < num_samples:
-        print(N, len(samples))
         x = np.random.rand(N)
         logm = logmmin + (logmmax - logmmin) * x
         imf_val = imf_function(logm, params)
