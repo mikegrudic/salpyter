@@ -10,7 +10,7 @@ salpyter is a python package designed to facilitate Bayesian inference of IMF pa
 
 
    installation
-   Walkthrough
+   quickstart
    API
    community
 
