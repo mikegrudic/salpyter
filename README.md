@@ -52,7 +52,7 @@ model = "chabrier_smooth" # try out other models by changing the name here
 imf_func = salpyter.get_imf_function(model)
 ?imf_func
 ```
-![png](quickstart_files/quickstart_8_1.png)
+![png](quickstart_files/docstring.png)
 
 Sampling some masses from the model to act as our test data and plotting the result:
 
