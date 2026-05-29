@@ -1,7 +1,7 @@
-"""Default parameters and bounds for IMF models (jax branch, MVP scope).
+"""Default parameters and bounds for IMF models (jax branch).
 
-Only ``chabrier_smooth`` is implemented. Bounds are only used for the L-BFGS-B
-MAP estimator; the NUTS sampler operates in unconstrained coordinates.
+Bounds are used both for the L-BFGS-B MAP estimator and for the NUTS sampler
+(as a smooth quadratic barrier — see ``sampling.imf_lnprob_samples``).
 """
 
 import numpy as np
@@ -16,13 +16,28 @@ CHABRIER_SMOOTH_DEFAULT_PARAMS = [
     float(np.log(0.55)),
     -1.3,
 ]
+# chabrier: chabrier_smooth + free logmbreak (default = log10(1 Msun))
+CHABRIER_DEFAULT_PARAMS = CHABRIER_SMOOTH_DEFAULT_PARAMS + [0.0]
 
 DEFAULT_IMF_PARAMS = {
     "chabrier_smooth": CHABRIER_SMOOTH_DEFAULT_PARAMS,
+    "chabrier": CHABRIER_DEFAULT_PARAMS,
+    # chabrier_smooth_bounds: smooth params + [logmmin, logmmax]. The bounds
+    # default to the imf_samples mass range so the rejection sampler draws
+    # cleanly within the model's support.
+    "chabrier_smooth_bounds": (
+        CHABRIER_SMOOTH_DEFAULT_PARAMS + [float(DEFAULT_LOGMMIN), float(DEFAULT_LOGMMAX)]
+    ),
 }
 
 DEFAULT_IMF_PARAMS_BOUNDS = {
     "chabrier_smooth": [[-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0]],
+    # chabrier adds logmbreak bounds.
+    "chabrier": [[-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-3.0, 3.0]],
+    # chabrier_smooth_bounds adds prior bounds on the sampled IMF support.
+    "chabrier_smooth_bounds": [
+        [-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-4.0, 4.0], [-4.0, 4.0],
+    ],
 }
 
 

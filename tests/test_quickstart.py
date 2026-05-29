@@ -1,9 +1,21 @@
 """Quickstart pytest for the jax-branch salpyter.
 
-Draws masses from the default chabrier_smooth IMF, fits with the NUTS
-sampler, and checks the posterior median recovers the input parameters.
-Tolerances are sized to the expected posterior width at N=1000 with
-~3-5x headroom for sampler/seed noise.
+Parameterized over ``salpyter.IMF_LIST``. Each model: draw masses from its
+defaults, fit via NUTS, check the posterior median recovers the input
+parameters within reasoned per-parameter tolerances.
+
+Per-model notes
+---------------
+- ``chabrier_smooth``: N=5000 needed because at N=1000 the alpha posterior
+  has a long flat tail (IMF degenerates to pure lognormal as
+  ``alpha → -∞`` once logmbreak crosses out of the data's mass range).
+- ``chabrier``: N=10000 to tighten the wider 4-param posterior (the default
+  parameters do *not* satisfy the smooth-break condition, giving a
+  discontinuity at logmbreak that broadens the joint posterior).
+- ``chabrier_smooth_bounds``: only the 3 base chabrier_smooth params are
+  checked; the sampled cutoffs ``logmmin`` and ``logmmax`` are unidentifiable
+  (any value below ``min(data)`` / above ``max(data)`` gives the same
+  likelihood once the support contains the data), so they're marked ``inf``.
 """
 
 import numpy as np
@@ -13,27 +25,30 @@ import salpyter
 from salpyter.default_imf_params import DEFAULT_IMF_PARAMS
 
 
+_CONFIG_BY_MODEL = {
+    "chabrier_smooth": dict(N=5000, tol=[0.05, 0.1, 0.2]),
+    "chabrier": dict(N=10000, tol=[0.05, 0.1, 0.2, 0.3]),
+    "chabrier_smooth_bounds": dict(N=5000, tol=[0.05, 0.1, 0.2, np.inf, np.inf]),
+}
+
+
 @pytest.mark.parametrize("model", salpyter.IMF_LIST)
 def test_quickstart_recovers_input_params(model):
+    cfg = _CONFIG_BY_MODEL[model]
+    tol = np.array(cfg["tol"], dtype=float)
+
     np.random.seed(42)
     true_params = np.array(DEFAULT_IMF_PARAMS[model], dtype=float)
+    assert tol.shape == true_params.shape, (
+        f"{model}: tol shape {tol.shape} != params shape {true_params.shape}"
+    )
 
-    # N=5000 is needed because at N=1000 the alpha posterior has a long flat
-    # tail (the IMF degenerates to a pure lognormal as alpha → -inf since
-    # logmbreak crosses out of the data's mass range), and the median wanders
-    # in that tail. At N=5000 the high-mass tail has enough stars to pin
-    # alpha down near the truth.
-    masses = salpyter.imf_samples(5000, model)
+    masses = salpyter.imf_samples(cfg["N"], model)
     sol = salpyter.imf_mostlikely_params(masses, model)
 
     num_samples = 1000
     samples = salpyter.imf_lnprob_samples(
-        masses,
-        model,
-        p0=sol.x,
-        num_warmup=500,
-        num_samples=num_samples,
-        seed=0,
+        masses, model, p0=sol.x, num_warmup=500, num_samples=num_samples, seed=0,
     )
 
     assert samples.shape == (num_samples, len(true_params)), (
@@ -42,9 +57,9 @@ def test_quickstart_recovers_input_params(model):
 
     median = np.median(samples, axis=0)
     diff = np.abs(median - true_params)
-    # Same tolerances as the master-branch quickstart test for chabrier_smooth.
-    tol = np.array([0.05, 0.1, 0.2])
-    assert np.all(diff < tol), (
+    checked = np.isfinite(tol)
+
+    assert np.all(diff[checked] < tol[checked]), (
         f"{model}: posterior medians did not recover input params within tolerance.\n"
         f"  true:   {true_params}\n"
         f"  median: {median}\n"

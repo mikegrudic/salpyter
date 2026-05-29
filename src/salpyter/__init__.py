@@ -19,6 +19,7 @@ import jax as _jax
 _jax.config.update("jax_enable_x64", True)
 
 from .default_imf_params import (  # noqa: E402
+    CHABRIER_DEFAULT_PARAMS,
     CHABRIER_SMOOTH_DEFAULT_PARAMS,
     DEFAULT_IMF_PARAMS,
     DEFAULT_IMF_PARAMS_BOUNDS,
@@ -28,27 +29,29 @@ from .default_imf_params import (  # noqa: E402
     imf_default_bounds,
     imf_default_params,
 )
-from .imfs import chabrier_smooth_imf  # noqa: E402
-from .likelihood import imf_lnprob, imf_mostlikely_params  # noqa: E402
+from .imfs import (  # noqa: E402
+    chabrier_imf,
+    chabrier_smooth_bounds_imf,
+    chabrier_smooth_imf,
+)
+from .likelihood import _MODEL_TO_FUNC, imf_lnprob, imf_mostlikely_params  # noqa: E402
 from .sampling import imf_lnprob_samples, imf_samples  # noqa: E402
 
-IMF_LIST = ["chabrier_smooth"]
+IMF_LIST = list(_MODEL_TO_FUNC.keys())
 
 
 def get_imf_function(model: str):
-    """Return the JAX-callable IMF function for ``model``.
-
-    Mirrors the master-branch helper so notebooks that do
-    ``imf_func = salpyter.get_imf_function(model)`` still work.
-    """
-    if model.lower() != "chabrier_smooth":
+    """Return the JAX-callable IMF function for ``model``."""
+    fn = _MODEL_TO_FUNC.get(model.lower())
+    if fn is None:
         raise NotImplementedError(
-            f"jax salpyter MVP only supports chabrier_smooth (got {model!r})"
+            f"jax salpyter supports {sorted(_MODEL_TO_FUNC)}; got {model!r}"
         )
-    return chabrier_smooth_imf
+    return fn
 
 
 __all__ = [
+    "CHABRIER_DEFAULT_PARAMS",
     "CHABRIER_SMOOTH_DEFAULT_PARAMS",
     "DEFAULT_IMF_PARAMS",
     "DEFAULT_IMF_PARAMS_BOUNDS",
@@ -56,6 +59,8 @@ __all__ = [
     "DEFAULT_LOGMMIN",
     "DEFAULT_MODEL",
     "IMF_LIST",
+    "chabrier_imf",
+    "chabrier_smooth_bounds_imf",
     "chabrier_smooth_imf",
     "get_imf_function",
     "imf_default_bounds",

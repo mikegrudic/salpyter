@@ -89,3 +89,131 @@ def chabrier_smooth_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     norm = lognormal_norm + powerlaw_norm
 
     return imf_pre / norm
+
+
+def chabrier_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """Chabrier IMF with a free high-mass break (4 parameters).
+
+    Same lognormal-plus-powerlaw form as ``chabrier_smooth_imf`` but the break
+    point ``logmbreak`` is sampled independently rather than derived from the
+    smooth-derivative condition.
+
+    Parameters
+    ----------
+    params : array_like, shape (4,)
+        ``[logm0, logsigma, alpha, logmbreak]``.
+    """
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    alpha = params[2]
+    logmbreak = params[3]
+
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    mbreak = 10.0**logmbreak
+
+    z = (logm - logm0) * inv_sigma
+    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
+
+    z_break = (logmbreak - logm0) * inv_sigma
+    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
+
+    m = 10.0**logm
+    powerlaw = normal_at_break * (m / mbreak) ** alpha
+
+    imf_pre = jnp.where(logm > logmbreak, powerlaw, lognormal)
+
+    upper_cap = jnp.minimum(logmmax, logmbreak)
+    X1 = (logmmin - logm0) * inv_sigma
+    X2 = (upper_cap - logm0) * inv_sigma
+    lognormal_norm = jnp.where(
+        logmmin < logmbreak,
+        0.5 * (erf(X2 / _SQRT2) - erf(X1 / _SQRT2)),
+        0.0,
+    )
+
+    mmin = 10.0**logmmin
+    mmax = 10.0**logmmax
+    xmin_pl = jnp.maximum(mmin, mbreak)
+    pl_integral = (mmax**alpha - xmin_pl**alpha) / alpha
+    powerlaw_norm = jnp.where(
+        logmmax > logmbreak,
+        normal_at_break * mbreak ** (-alpha) * pl_integral / _LN10,
+        0.0,
+    )
+    norm = lognormal_norm + powerlaw_norm
+
+    return imf_pre / norm
+
+
+def chabrier_smooth_bounds_imf(logm, params, logmmin_unused=-jnp.inf, logmmax_unused=4.0):
+    """Chabrier-smooth IMF with sampled low/high-mass cutoffs (5 parameters).
+
+    The last two parameters ``logmmin``, ``logmmax`` are the mass-range cutoffs
+    of the IMF support. The IMF is set to zero outside ``[logmmin, logmmax]``
+    (matching the master-branch ``imf_with_bounds_params`` behavior), and the
+    normalization integral is over the same range.
+
+    The ``logmmin_unused``/``logmmax_unused`` arguments are accepted for
+    signature parity with the other IMF functions; the cutoffs are taken from
+    ``params``.
+
+    Parameters
+    ----------
+    params : array_like, shape (5,)
+        ``[logm0, logsigma, alpha, logmmin, logmmax]``.
+    """
+    del logmmin_unused, logmmax_unused
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    alpha = params[2]
+    logmmin = params[3]
+    logmmax = params[4]
+
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    logmbreak = logm0 - alpha * sigma * sigma * _LN10
+    mbreak = 10.0**logmbreak
+
+    z = (logm - logm0) * inv_sigma
+    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
+
+    z_break = (logmbreak - logm0) * inv_sigma
+    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
+
+    m = 10.0**logm
+    powerlaw = normal_at_break * (m / mbreak) ** alpha
+
+    imf_pre = jnp.where(logm > logmbreak, powerlaw, lognormal)
+    # Zero outside the sampled support; this is what makes the bounded model
+    # distinct from chabrier_smooth — data points outside [logmmin, logmmax]
+    # contribute log(0) ≈ -691 per point under the lnprob clip, strongly
+    # rejecting proposals whose support doesn't cover the data.
+    inside = (logm >= logmmin) & (logm <= logmmax)
+    imf_pre = jnp.where(inside, imf_pre, 0.0)
+
+    upper_cap = jnp.minimum(logmmax, logmbreak)
+    X1 = (logmmin - logm0) * inv_sigma
+    X2 = (upper_cap - logm0) * inv_sigma
+    lognormal_norm = jnp.where(
+        logmmin < logmbreak,
+        0.5 * (erf(X2 / _SQRT2) - erf(X1 / _SQRT2)),
+        0.0,
+    )
+
+    mmin = 10.0**logmmin
+    mmax = 10.0**logmmax
+    xmin_pl = jnp.maximum(mmin, mbreak)
+    pl_integral = (mmax**alpha - xmin_pl**alpha) / alpha
+    powerlaw_norm = jnp.where(
+        logmmax > logmbreak,
+        normal_at_break * mbreak ** (-alpha) * pl_integral / _LN10,
+        0.0,
+    )
+    norm = lognormal_norm + powerlaw_norm
+
+    return imf_pre / norm

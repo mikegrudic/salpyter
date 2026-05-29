@@ -17,12 +17,20 @@ from .default_imf_params import (
 )
 
 
+_MODEL_TO_FUNC = {
+    "chabrier_smooth": imfs.chabrier_smooth_imf,
+    "chabrier": imfs.chabrier_imf,
+    "chabrier_smooth_bounds": imfs.chabrier_smooth_bounds_imf,
+}
+
+
 def _resolve_imf_func(model):
-    if model.lower() != "chabrier_smooth":
+    fn = _MODEL_TO_FUNC.get(model.lower())
+    if fn is None:
         raise NotImplementedError(
-            f"jax salpyter MVP only supports chabrier_smooth (got {model!r})"
+            f"jax salpyter supports {sorted(_MODEL_TO_FUNC)}; got {model!r}"
         )
-    return imfs.chabrier_smooth_imf
+    return fn
 
 
 def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):
