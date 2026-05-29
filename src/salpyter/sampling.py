@@ -64,43 +64,67 @@ def imf_lnprob_samples(
     masses,
     model=DEFAULT_MODEL,
     p0=None,
-    bounds=None,  # accepted for API parity with master; not used here
+    bounds=None,
     num_warmup: int = 500,
     num_samples: int = 1000,
+    num_chains: int = 1,
     seed: int = 0,
     logmmin=None,
     logmmax=None,
     target_acceptance: float = 0.8,
+    perturbation_scale=None,
 ):
-    """Posterior samples of IMF parameters via NUTS (blackjax).
+    """Posterior samples of IMF parameters via multi-chain NUTS (blackjax).
+
+    Runs ``num_chains`` independent NUTS chains in parallel via ``jax.vmap``.
+    Each chain gets its own randomly perturbed starting point (so different
+    chains can land in different modes of a multimodal posterior), runs its
+    own window-adaptation warmup (so each chain tunes step size + mass matrix
+    to its local geometry), then draws ``num_samples // num_chains`` samples.
+    Output is the concatenation, shape ``(num_samples_total, ndim)``.
 
     Parameters
     ----------
     masses : array_like
         Stellar masses.
     model : str
-        IMF model name. Only ``"chabrier_smooth"`` is supported in the MVP.
+        IMF model name.
     p0 : array_like, optional
-        NUTS starting position. If ``None``, runs L-BFGS-B first to find the MAP.
-    bounds : ignored
-        Present only for source-level API parity with the emcee version. NUTS
-        runs in unconstrained coordinates with a flat improper prior.
+        Base NUTS starting position (length ``ndim``). If ``None``, runs the
+        MAP estimator first. Each chain starts at ``p0`` + a per-chain
+        Gaussian perturbation.
+    bounds : array_like, optional
+        Per-parameter ``(lo, hi)``. Used for the smooth quadratic prior
+        barrier and to clip the per-chain initial perturbations.
     num_warmup : int
-        Number of window-adaptation steps. Step size and the inverse mass
-        matrix are tuned during this phase; the samples are discarded.
+        Window-adaptation steps per chain. Adapted state is discarded.
     num_samples : int
-        Number of post-warmup samples to draw (returned).
+        Total number of post-warmup samples returned (across all chains).
+        Each chain runs ``num_samples // num_chains`` steps. If not divisible,
+        the actual total is rounded down.
+    num_chains : int
+        Number of NUTS chains (default 1). Multi-chain is implemented via
+        ``jax.vmap`` but **does not parallelize on CPU** — XLA's CPU backend
+        serializes the vmapped axis, so 4 chains takes ~4x single-chain wall
+        time. Reach for multi-chain only when you suspect the posterior is
+        multimodal and you want different chains to land in different modes.
     seed : int
-        PRNG seed for the NUTS chain.
+        PRNG seed.
     logmmin, logmmax : float, optional
-        log10 mass-range bounds defining the IMF normalization. Default to the
-        data min/max.
+        log10 mass-range bounds for the IMF normalization. Default to data
+        min/max.
     target_acceptance : float
         Window-adaptation target acceptance rate.
+    perturbation_scale : array_like or float, optional
+        Std-dev of the Gaussian perturbation applied to ``p0`` per chain.
+        Defaults to ``0.1 * (hi - lo)`` per parameter — wide enough to seed
+        cross-mode exploration of typical bounded-IMF posteriors, narrow
+        enough that most chains start in a reasonable-likelihood region.
+        Ignored when ``num_chains == 1``.
 
     Returns
     -------
-    samples : np.ndarray, shape (num_samples, n_params)
+    samples : np.ndarray, shape (num_samples_total, ndim)
     """
     imf_fn = _resolve_imf_func(model)
 
@@ -120,12 +144,8 @@ def imf_lnprob_samples(
 
     def lnprob(p):
         imf_val = imf_fn(logm, p, lmin, lmax)
-        # Guard against -inf when the proposed IMF is non-positive at any
-        # sample mass. Using jnp.log(jnp.clip(...)) keeps the gradient finite,
-        # which matters for NUTS leapfrog stability.
         log_imf = jnp.log(jnp.clip(imf_val, 1e-300, None))
         ll = jnp.sum(log_imf)
-        # Smooth uniform prior on bounds (quadratic penalty outside box).
         over = jax.nn.relu(p - hi)
         under = jax.nn.relu(lo - p)
         log_prior = -1e6 * jnp.sum(over * over + under * under)
@@ -135,24 +155,53 @@ def imf_lnprob_samples(
         sol = imf_mostlikely_params(masses, model, logmmin=lmin, logmmax=lmax)
         p0 = sol.x
     p0_arr = jnp.asarray(p0, dtype=jnp.float64)
+    ndim = p0_arr.shape[0]
 
-    key = jax.random.PRNGKey(seed)
-    warmup_key, sample_key = jax.random.split(key)
+    num_chains = max(1, int(num_chains))
+    samples_per_chain = max(1, num_samples // num_chains)
 
-    warmup = blackjax.window_adaptation(
-        blackjax.nuts,
-        lnprob,
-        target_acceptance_rate=target_acceptance,
-    )
-    (state, tuned_params), _ = warmup.run(warmup_key, p0_arr, num_steps=num_warmup)
+    # Build per-chain starting points.
+    rng = jax.random.PRNGKey(seed)
+    init_key, warmup_key, sample_key = jax.random.split(rng, 3)
 
-    nuts = blackjax.nuts(lnprob, **tuned_params)
+    if num_chains == 1:
+        p0_chains = p0_arr[None, :]
+    else:
+        if perturbation_scale is None:
+            scale = 0.1 * (hi - lo)
+        else:
+            scale = jnp.broadcast_to(jnp.asarray(perturbation_scale, dtype=jnp.float64), (ndim,))
+        noise = jax.random.normal(init_key, (num_chains, ndim))
+        p0_chains = p0_arr[None, :] + noise * scale[None, :]
+        # Clip into the box minus a small margin so warmup doesn't start
+        # already in the barrier region.
+        margin = 0.01 * (hi - lo)
+        p0_chains = jnp.clip(p0_chains, (lo + margin)[None, :], (hi - margin)[None, :])
 
-    def one_step(state, key):
-        new_state, _info = nuts.step(key, state)
-        return new_state, new_state.position
+    warmup_keys = jax.random.split(warmup_key, num_chains)
+    sample_keys = jax.random.split(sample_key, num_chains)
 
-    keys = jax.random.split(sample_key, num_samples)
-    _, positions = jax.lax.scan(one_step, state, keys)
+    def run_chain(wkey, skey, init_pos):
+        warmup = blackjax.window_adaptation(
+            blackjax.nuts, lnprob, target_acceptance_rate=target_acceptance,
+        )
+        (state, tuned), _ = warmup.run(wkey, init_pos, num_steps=num_warmup)
+        nuts = blackjax.nuts(lnprob, **tuned)
 
-    return np.asarray(positions)
+        def step(s, k):
+            ns, _ = nuts.step(k, s)
+            return ns, ns.position
+
+        keys = jax.random.split(skey, samples_per_chain)
+        _, positions = jax.lax.scan(step, state, keys)
+        return positions  # (samples_per_chain, ndim)
+
+    if num_chains == 1:
+        all_samples = run_chain(warmup_keys[0], sample_keys[0], p0_chains[0])
+    else:
+        # vmap across chains: each chain runs an independent warmup + sampling.
+        all_samples = jax.vmap(run_chain)(warmup_keys, sample_keys, p0_chains)
+        # Shape (num_chains, samples_per_chain, ndim) -> (total, ndim).
+        all_samples = all_samples.reshape(-1, ndim)
+
+    return np.asarray(all_samples)
