@@ -148,7 +148,7 @@ def chabrier_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     return imf_pre / norm
 
 
-def chabrier_smooth_bounds_imf(logm, params, logmmin_unused=-jnp.inf, logmmax_unused=4.0):
+def chabrier_smooth_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """Chabrier-smooth IMF with sampled low/high-mass cutoffs (5 parameters).
 
     The last two parameters ``logmmin``, ``logmmax`` are the mass-range cutoffs
@@ -156,16 +156,16 @@ def chabrier_smooth_bounds_imf(logm, params, logmmin_unused=-jnp.inf, logmmax_un
     (matching the master-branch ``imf_with_bounds_params`` behavior), and the
     normalization integral is over the same range.
 
-    The ``logmmin_unused``/``logmmax_unused`` arguments are accepted for
-    signature parity with the other IMF functions; the cutoffs are taken from
-    ``params``.
+    The ``logmmin``/``logmmax`` keyword arguments are accepted for signature
+    parity with the other IMF functions but are ignored; the cutoffs are taken
+    from ``params``.
 
     Parameters
     ----------
     params : array_like, shape (5,)
         ``[logm0, logsigma, alpha, logmmin, logmmax]``.
     """
-    del logmmin_unused, logmmax_unused
+    del logmmin, logmmax  # cutoffs come from params, not kwargs
     logm = jnp.asarray(logm)
     params = jnp.asarray(params)
     logm0 = params[0]
