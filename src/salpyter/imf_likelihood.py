@@ -13,26 +13,47 @@ _SQRT2 = np.sqrt(2.0)
 _INV_SQRT_2PI = 1.0 / np.sqrt(2.0 * np.pi)
 
 
-def _chabrier_smooth_lnprob_vec(params_batch, logm, m, logmmin, logmmax, lo, hi):
-    """Vectorized lnprob for the ``chabrier_smooth`` IMF.
+def _chabrier_family_lnprob_vec(
+    params_batch,
+    logm,
+    m,
+    lo,
+    hi,
+    *,
+    mode,
+    logmmin_data=None,
+    logmmax_data=None,
+):
+    """Vectorized lnprob for the chabrier-family of IMFs.
 
-    Computes log p(masses | params) for many parameter vectors at once. Equivalent
-    to looping ``imf_lnprob(params, masses, "chabrier_smooth", logmmin, logmmax)``
-    over the rows of ``params_batch``, but with all the numpy/Python overhead
-    amortized across walkers.
+    Computes log p(masses | params) for many parameter vectors at once.
+    Equivalent to looping the scalar ``imf_lnprob`` over the rows of
+    ``params_batch``, with all the numpy/Python overhead amortized across walkers.
 
     Parameters
     ----------
-    params_batch: (W, 3) array of [logm0, logsigma, alpha]
-    logm: (N,) array of log10(masses)
-    m: (N,) array of masses (== 10**logm, precomputed)
-    logmmin, logmmax: scalar mass-range bounds
-    lo, hi: (3,) parameter bounds
+    params_batch: (W, ndim) array of model parameters.
+    logm: (N,) array of log10(masses).
+    m: (N,) array of masses (precomputed 10**logm).
+    lo, hi: (ndim,) parameter bounds.
+    mode: one of
+
+        * "smooth"        — 3 params [logm0, logsigma, alpha], smooth high-mass
+          break, mass-range bounds taken from ``logmmin_data``/``logmmax_data``.
+          Matches ``chabrier_smooth_imf``.
+        * "free_break"    — 4 params [logm0, logsigma, alpha, logmbreak],
+          mass-range bounds from ``logmmin_data``/``logmmax_data``. Matches
+          ``chabrier_imf``.
+        * "smooth_bounds" — 5 params [logm0, logsigma, alpha, logmmin, logmmax],
+          smooth break, per-walker mass-range bounds taken from the params.
+          Matches ``chabrier_smooth_bounds_imf`` (via ``imf_with_bounds_params``).
+    logmmin_data, logmmax_data: scalar mass-range bounds, used only for
+        the "smooth" and "free_break" modes.
 
     Returns
     -------
     (W,) array of log-probabilities, with -inf for walkers outside bounds or
-    where the IMF is non-positive at any sample.
+    where the IMF is non-positive at any sample mass.
     """
     params_batch = np.atleast_2d(params_batch)
     in_bounds = ~(
@@ -44,9 +65,24 @@ def _chabrier_smooth_lnprob_vec(params_batch, logm, m, logmmin, logmmax, lo, hi)
     alpha = params_batch[:, 2]
     sigma = np.exp(logsigma)
     inv_sigma = 1.0 / sigma
-    # Smooth-break condition (matches chabrier_smooth_imf)
-    logmbreak = logm0 - alpha * sigma * sigma * _LN10
-    mbreak = 10.0**logmbreak
+
+    if mode == "smooth":
+        # Smooth-break condition (matches chabrier_smooth_imf).
+        logmbreak = logm0 - alpha * sigma * sigma * _LN10
+        logmmin = logmmin_data
+        logmmax = logmmax_data
+    elif mode == "free_break":
+        logmbreak = params_batch[:, 3]
+        logmmin = logmmin_data
+        logmmax = logmmax_data
+    elif mode == "smooth_bounds":
+        logmbreak = logm0 - alpha * sigma * sigma * _LN10
+        logmmin = params_batch[:, 3]
+        logmmax = params_batch[:, 4]
+    else:  # pragma: no cover
+        raise ValueError(f"unknown mode {mode!r}")
+
+    mbreak = 10.0**logmbreak  # (W,)
 
     # Lognormal part, shape (W, N)
     z = (logm[None, :] - logm0[:, None]) * inv_sigma[:, None]
@@ -63,8 +99,16 @@ def _chabrier_smooth_lnprob_vec(params_batch, logm, m, logmmin, logmmax, lo, hi)
     mask = logm[None, :] > logmbreak[:, None]
     imf_pre = np.where(mask, powerlaw, lognormal)
 
-    # --- Normalization (vectorized chabrier_imf_norm) ---
-    # Lognormal-part integral: nonzero only where logmmin < logmbreak.
+    if mode == "smooth_bounds":
+        # Mirror imf_with_bounds_params: zero the IMF outside the per-walker
+        # mass range. Any data point outside will make np.log(0) → -inf and
+        # the walker gets rejected.
+        outside = (logm[None, :] < logmmin[:, None]) | (logm[None, :] > logmmax[:, None])
+        imf_pre = np.where(outside, 0.0, imf_pre)
+
+    # --- Normalization (vectorized chabrier_imf_norm). ---
+    # logmmin, logmmax are either scalars (smooth, free_break) or (W,) arrays
+    # (smooth_bounds). Broadcasting handles both uniformly.
     upper_cap = np.minimum(logmmax, logmbreak)
     X1 = (logmmin - logm0) * inv_sigma
     X2 = (upper_cap - logm0) * inv_sigma
@@ -74,7 +118,6 @@ def _chabrier_smooth_lnprob_vec(params_batch, logm, m, logmmin, logmmax, lo, hi)
         0.0,
     )
 
-    # Power-law-part integral: nonzero only where logmmax > logmbreak.
     mmin = 10.0**logmmin
     mmax = 10.0**logmmax
     xmin_pl = np.maximum(mmin, mbreak)
@@ -100,6 +143,13 @@ def _chabrier_smooth_lnprob_vec(params_batch, logm, m, logmmin, logmmax, lo, hi)
     finite = np.isfinite(lg).all(axis=1)
     sums = lg.sum(axis=1)
     return np.where(in_bounds & finite, sums, -np.inf)
+
+
+_MODEL_TO_VEC_MODE = {
+    "chabrier_smooth": "smooth",
+    "chabrier": "free_break",
+    "chabrier_smooth_bounds": "smooth_bounds",
+}
 
 
 def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):
@@ -230,15 +280,19 @@ def imf_lnprob_samples(
     lmin = logm.min() if logmmin is None else logmmin
     lmax = logm.max() if logmmax is None else logmmax
 
-    # The chabrier_smooth model has a hand-vectorized lnprob that evaluates all
+    # Chabrier-family models have hand-vectorized lnprobs that evaluate all
     # walkers in one call, collapsing ~100x of the per-step numpy overhead.
-    use_vec = model.lower() == "chabrier_smooth"
+    vec_mode = _MODEL_TO_VEC_MODE.get(model.lower())
+    use_vec = vec_mode is not None
 
     if use_vec:
         m_arr = 10.0**logm
 
         def lnprob(params):
-            return _chabrier_smooth_lnprob_vec(params, logm, m_arr, lmin, lmax, lo, hi)
+            return _chabrier_family_lnprob_vec(
+                params, logm, m_arr, lo, hi,
+                mode=vec_mode, logmmin_data=lmin, logmmax_data=lmax,
+            )
 
         def lnprob_scalar(params):
             return lnprob(params)[0]
