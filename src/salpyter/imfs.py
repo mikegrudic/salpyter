@@ -1,239 +1,91 @@
+"""Differentiable JAX IMF functions.
+
+Each IMF takes ``logm`` (log10 mass), a ``params`` vector, and scalar mass-range
+bounds ``logmmin``/``logmmax`` defining the normalization range. It returns the
+IMF value (normalized to integrate to 1 over [logmmin, logmmax] with respect to
+log10(m)).
+
+All functions are pure JAX and safe to ``jit``, ``grad``, and ``vmap``.
 """
-Routines for analyzing the IMF data from the simulations
-"""
 
-import numpy as np
-from .norm_functions import powerlaw_integral, chabrier_imf_norm, normal
-from .default_imf_params import *
+import jax.numpy as jnp
+from jax.scipy.special import erf
 
-
-def powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=None):
-    """
-    Simple single-power-law (e.g. Salpeter) IMF
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (1,) array-like containing the IMF slope (Salpeter value = -1.35)
-    logmmin: float, optional
-        Low-mass cutoff
-    logmmax: float, optional
-        High-mass cutoff
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-    slope = params[0]  # -1.35 = salpeter
-    mmin, mmax = 10**logmmin, 10**logmmax
-    norm = powerlaw_integral(mmin, mmax, slope - 1) / np.log(10)  # slope-1 and log10 to convert from m to logm function
-    m = 10**logm
-    imf = m**slope / norm
-    imf[(m > mmax * (1 + 1e-15)) ^ (m < (1 - 1e-15) * mmin)] = 0.0
-    return imf
+_LN10 = jnp.log(10.0)
+_SQRT2 = jnp.sqrt(2.0)
+_INV_SQRT_2PI = 1.0 / jnp.sqrt(2.0 * jnp.pi)
 
 
-def imf_with_bounds_params(logm, params, imf0=powerlaw_imf):
-    """
-    Given another base IMF model, implements an IMF that adds lower and upper bounds as the last 2 additional parameters
+def chabrier_smooth_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """Chabrier IMF with a smooth high-mass break.
+
+    A lognormal at low mass that transitions smoothly into a power-law tail.
+    The break point ``logmbreak`` is set by the continuity-of-derivative
+    condition (same as the master-branch ``chabrier_smooth_imf``).
 
     Parameters
     ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (n_params+2,) array where the initial parameters are for the base IMF and the  last 2  are the low- and
-        high-mass cutoff
-    imf0: function, optional
-        function implmenting the base IMF
+    logm : array_like
+        log10(mass) at which to evaluate the IMF.
+    params : array_like, shape (3,)
+        ``[logm0, logsigma, alpha]`` where ``logm0`` is the log10 of the
+        lognormal peak mass, ``logsigma`` is the log of the (log10-units)
+        lognormal width, and ``alpha`` is the high-mass slope.
+    logmmin, logmmax : float
+        log10 mass-range bounds defining the normalization integral.
 
     Returns
     -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
+    jnp.ndarray
+        Same shape as ``logm``. The IMF normalized so the integral over
+        log10(m) in [logmmin, logmmax] is 1.
     """
-    logmmin, logmmax = params[-2:]
-    imf = imf0(logm, params[:-2], logmmin, logmmax)
-    imf[(logm > logmmax) ^ (logm < logmmin)] = 0.0
-    return imf
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    alpha = params[2]
 
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    # Smooth-break condition: the powerlaw matches the lognormal's value and
+    # log-derivative at logmbreak.
+    logmbreak = logm0 - alpha * sigma * sigma * _LN10
+    mbreak = 10.0**logmbreak
 
-# def piecewise_powerlaw_imf(logm, params, logmmin=-np.inf, logmmax=4):
-#     """Piecewise-power-law (e.g. Scalo, Kroupa) IMF"""
-#     if len(params) == 1:
-#         return powerlaw_imf(logm, params, logmmin, logmmax)
+    z = (logm - logm0) * inv_sigma
+    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
 
-#     if len(params) % 2 == 0:
-#         raise ValueError("Piecewise power-law IMF must have an odd number of parameters.")
-#     slopes = params[::2]  # parameters: slope 1, logm12, slope2, logm23, ... slopeN
-#     logmbreaks = params[1::2]  # segment break masses
-#     mmin, mmax = 10**logmmin, 10**logmmax
-#     norm = 0
+    z_break = (logmbreak - logm0) * inv_sigma
+    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
 
-#     #    imf_value = np.heaviside(logm - logmmin) * np.heaviside(logmmax - logm)
-#     imf_value = np.ones_like(logm)
-#     m0 = 1.0
-#     for i, s in enumerate(slopes):  # loop over segments
-#         if logmbreaks[i]
-#         #norm += powerlaw_integral(mmin, mmax, s - 1) / np.log(10)
+    m = 10.0**logm
+    powerlaw = normal_at_break * (m / mbreak) ** alpha
 
-#         # imf_value *= np.heaviside
+    imf_pre = jnp.where(logm > logmbreak, powerlaw, lognormal)
 
-#     m = 10**logm
-#     return m**slope / norm
+    # Normalization. The lognormal contributes only on [logmmin, min(logmmax, logmbreak)];
+    # the power-law contributes only on [max(logmmin, logmbreak), logmmax].
+    upper_cap = jnp.minimum(logmmax, logmbreak)
+    X1 = (logmmin - logm0) * inv_sigma
+    X2 = (upper_cap - logm0) * inv_sigma
+    lognormal_norm = jnp.where(
+        logmmin < logmbreak,
+        0.5 * (erf(X2 / _SQRT2) - erf(X1 / _SQRT2)),
+        0.0,
+    )
 
+    mmin = 10.0**logmmin
+    mmax = 10.0**logmmax
+    xmin_pl = jnp.maximum(mmin, mbreak)
+    # powerlaw_integral(xmin, xmax, alpha-1) = (xmax**alpha - xmin**alpha) / alpha,
+    # for alpha != 0. NUTS proposes alpha continuously so alpha == 0 has measure 0.
+    pl_integral = (mmax**alpha - xmin_pl**alpha) / alpha
+    powerlaw_norm = jnp.where(
+        logmmax > logmbreak,
+        normal_at_break * mbreak ** (-alpha) * pl_integral / _LN10,
+        0.0,
+    )
+    norm = lognormal_norm + powerlaw_norm
 
-def chabrier_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """Returns the value of the Chabrier IMF form as a distribution in log m
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (4,) array of parameters: [log m_peak, log sigma, slope, log m_break]
-    logmmin: float, optional
-        Low-mass cutoff
-    logmmax: float, optional
-        High-mass cutoff
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-    logm0, logsigma, alpha, logmbreak = params
-    sigma = np.exp(logsigma)
-    imf = normal(logm, logm0, sigma)
-
-    m, mbreak = 10**logm, 10**logmbreak
-    imf[logm > logmbreak] = normal(logmbreak, logm0, sigma) * (m[logm > logmbreak] / mbreak) ** alpha
-    norm = chabrier_imf_norm(params, logmmin, logmmax)
-
-    return imf / norm  # chabrier_imf_norm(params, logmmin, logmmax)
-
-
-def chabrier_smooth_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """
-    Chabrier IMF constrained to have a smooth break between the lognormal and power-law part
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (3,) array of parameters: [log m_peak, log sigma, slope]
-    logmmin: float, optional
-        Low-mass cutoff
-    logmmax: float, optional
-        High-mass cutoff
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-
-    logm0, logsigma, alpha = params
-    sigma = np.exp(logsigma)
-    logmbreak = logm0 - alpha * sigma * sigma * np.log(10.0)  # condition for smooth transition
-    params_chabrier = logm0, np.log(sigma), alpha, logmbreak
-    return chabrier_imf(logm, params_chabrier, logmmin, logmmax)
-
-
-def imf_plus_lognormal(logm, params, imf0=chabrier_smooth_imf, logmmin=-np.inf, logmmax=4, cutoff=False):
-    """Sum of any IMF and a lognormal peak
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (n_params,) array of parameters. The first values will be the parameters of the base IMF.  If cutoff is
-        True, the last 3 parameters specify:
-          1. The high-mass cutoff of the original IMF
-          2. the log of the fraction of stars in the lognormal component,
-          3. the log of the lognormal's peak mass
-          4. the log of the lognormal's sigma
-        If cutoff is False, the high-mass cutoff parameter above is omitted.
-    imf0: function, optional
-        IMF function for the base IMF
-    logmmin: float, optional
-        low-mass cutoff
-    logmmax: float, optional
-        high-mass cutoff
-    cutoff: boolean, optional
-        Whether to include a high-mass cutoff for the base IMF in the parameters
-
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-    xmin, xmax = logmmin, logmmax
-    if cutoff:
-        params0 = params[:-4]
-        log_mcut, log_fpeak, logm0_peak, logsigma_peak = params[-4:]
-        imf1 = imf0(logm, params0, xmin, min(xmax, log_mcut))
-        imf1[logm > log_mcut] = 0.0
-    else:
-        params0 = params[:-3]
-        log_fpeak, logm0_peak, logsigma_peak = params[-3:]
-        imf1 = imf0(logm, params0, xmin, xmax)
-
-    imf2 = normal(logm, logm0_peak, np.exp(logsigma_peak), xmin=xmin, xmax=xmax)
-    wt = 10**log_fpeak
-    wt1 = 1 / (1 + wt)
-    wt2 = 1 - wt1
-
-    imf = wt1 * imf1 + wt2 * imf2
-    return imf
-
-
-def chabrier_smooth_lognormal_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """
-    IMF consisting of a chabrier_smooth IMF component plus a lognormal component
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (6,) array of parameters: [log m_peak, log sigma, slope, log f_peak, log m_peak, log sigma_peak]
-    logmmin: float, optional
-        Low-mass cutoff
-    logmmax: float, optional
-        High-mass cutoff
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-    return imf_plus_lognormal(logm, params, chabrier_smooth_imf, logmmin, logmmax)
-
-
-def chabrier_smooth_cutoff_lognormal_imf(logm, params, logmmin=-np.inf, logmmax=4):
-    """IMF consisting of a chabrier_smooth IMF component *with a sharp high-mass cutoff* plus a lognormal component
-
-    Parameters
-    ----------
-    logm: array_like
-        Array of log10(mass) values at which to evaluate the IMF
-    params: array_like
-        Shape (7,) array of parameters: [log m_peak, log sigma, slope, log mmax, log f_peak, log m_peak, log sigma_peak]
-    logmmin: float, optional
-        Low-mass cutoff
-    logmmax: float, optional
-        High-mass cutoff
-
-    Returns
-    -------
-    imf: array-like
-        Value of the IMF normalized to integrate over logm
-    """
-    return imf_plus_lognormal(logm, params, chabrier_smooth_imf, logmmin, logmmax, cutoff=True)
+    return imf_pre / norm
