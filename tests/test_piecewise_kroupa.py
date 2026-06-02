@@ -26,15 +26,25 @@ At N=10000 stars drawn from the model with cutoffs at log10(M) in [-2, 2]:
 """
 
 import os
+from pathlib import Path
 
 # Force CPU before any JAX import so this test plays nice with multi-test runs.
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
+
+import jax.numpy as jnp
+import matplotlib
+
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt
 
 import numpy as np
 import pytest
 
 import salpyter
 from salpyter import IMFModel, piecewise
+
+# Where to drop visual artifacts for inspection.
+_ARTIFACT_DIR = Path(__file__).parent / "_artifacts"
 
 # True Kroupa parameters in dN/d(log10 m) units. dN/dm Kroupa slopes are
 # (0.3, 1.3, 2.3); converting to dN/dlogm by adding 1 - α gives (0.7, -0.3, -1.3).
@@ -60,6 +70,53 @@ def _kroupa_true_params() -> np.ndarray:
         list(KROUPA_SLOPES) + list(KROUPA_BREAKS) + list(KROUPA_CUTOFFS),
         dtype=float,
     )
+
+
+def _plot_kroupa_posterior(model, masses, samples, outpath, num_lines=100):
+    """Plot the input-mass histogram and ``num_lines`` posterior IMF samples."""
+    n_bins = 31
+    mbins = np.logspace(-3, 4, n_bins + 1)
+    mgrid = np.logspace(-3, 4, 1001)
+    logm_grid = np.log10(mgrid)
+
+    # Convert IMF in dN/d(log10 m) units to expected histogram bin counts.
+    log_bin_width = np.log10(mbins.max() / mbins.min()) / n_bins
+    imf_to_bins = log_bin_width * len(masses)
+
+    # Thin the posterior samples to num_lines.
+    if len(samples) >= num_lines:
+        idx = np.linspace(0, len(samples) - 1, num_lines).astype(int)
+        sub = samples[idx]
+    else:
+        sub = samples
+
+    fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+    ax.hist(masses, mbins, histtype="step", color="black", linewidth=1.2,
+            label=f"data (N={len(masses)})")
+
+    # The lmin/lmax args passed to imf_fn are required but not used by the
+    # truncate-wrapped model (it derives them from params). Pass dummy values.
+    for s in sub:
+        imf_vals = np.asarray(model.imf_fn(jnp.asarray(logm_grid), jnp.asarray(s), -3.0, 4.0))
+        ax.plot(mgrid, imf_vals * imf_to_bins, color="steelblue", lw=0.3, alpha=0.4)
+
+    # One reference posterior median for the label, plotted slightly bolder.
+    median = np.median(samples, axis=0)
+    imf_med = np.asarray(model.imf_fn(jnp.asarray(logm_grid), jnp.asarray(median), -3.0, 4.0))
+    ax.plot(mgrid, imf_med * imf_to_bins, color="crimson", lw=1.5, label="posterior median")
+
+    ax.set(
+        xscale="log", yscale="log",
+        xlim=[5e-3, 200],
+        ylim=[0.5, 2 * len(masses)],
+        xlabel=r"$M\ (M_\odot)$",
+        ylabel="count per bin",
+        title=f"piecewise(powerlaw x 3).truncate()  ·  {num_lines} posterior draws",
+    )
+    ax.legend(loc="lower left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(outpath, bbox_inches="tight")
+    plt.close(fig)
 
 
 def test_kroupa_param_names_and_dim():
@@ -130,6 +187,17 @@ def test_kroupa_piecewise_recovers_input_params():
         f"  median:      {median}\n"
         f"  |diff|:      {diff}\n"
         f"  tol:         {tol}"
+    )
+
+    # Visual artifact: histogram of the input masses with 100 posterior-
+    # sampled IMF curves overplotted. Saved next to the test under
+    # tests/_artifacts/ so a human can sanity-check the fit at a glance.
+    _ARTIFACT_DIR.mkdir(exist_ok=True)
+    _plot_kroupa_posterior(
+        kroupa,
+        masses=masses,
+        samples=samples,
+        outpath=_ARTIFACT_DIR / "kroupa_posterior.pdf",
     )
 
     # The cutoff posteriors are pinned to the data extrema, not to the
