@@ -29,6 +29,16 @@ _CONFIG_BY_MODEL = {
     "chabrier_smooth": dict(N=5000, tol=[0.05, 0.1, 0.2]),
     "chabrier": dict(N=10000, tol=[0.05, 0.1, 0.2, 0.3]),
     "chabrier_smooth_bounds": dict(N=5000, tol=[0.05, 0.1, 0.2, np.inf, np.inf]),
+    # exp_bounds: Schechter cutoffs are weakly constrained because of the
+    # base shape <-> cutoff degeneracy (the cutoff scale trades off with the
+    # natural lognormal/powerlaw extent). Same flagging strategy as the hard-
+    # bounds variant: check shape, skip cutoff params.
+    "chabrier_smooth_exp_bounds": dict(
+        N=5000, tol=[0.05, 0.1, 0.3, np.inf, np.inf],
+    ),
+    "chabrier_exp_bounds": dict(
+        N=10000, tol=[0.05, 0.1, 0.3, 0.4, np.inf, np.inf],
+    ),
 }
 
 

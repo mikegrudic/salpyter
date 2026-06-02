@@ -21,6 +21,8 @@ _MODEL_TO_FUNC = {
     "chabrier_smooth": imfs.chabrier_smooth_imf,
     "chabrier": imfs.chabrier_imf,
     "chabrier_smooth_bounds": imfs.chabrier_smooth_bounds_imf,
+    "chabrier_smooth_exp_bounds": imfs.chabrier_smooth_exp_bounds_imf,
+    "chabrier_exp_bounds": imfs.chabrier_exp_bounds_imf,
 }
 
 
@@ -67,6 +69,26 @@ def _bootstrap_p0(masses, model, logmmin=None, logmmax=None):
         sigma = float(np.exp(logsigma))
         logmbreak = float(logm0) - float(alpha) * sigma * sigma * float(np.log(10.0))
         return list(base) + [logmbreak]
+    if lower == "chabrier_smooth_exp_bounds":
+        # Same shape bootstrap as the hard-bounds version, but initialize the
+        # exp cutoffs *outside* the data range so they don't suppress data
+        # at the starting point. exp(-1) cutoff at logmmin sits right at data
+        # min, so we put logmmin a decade below to keep the cutoff out of the
+        # data range during the first MAP evaluation.
+        base = imf_mostlikely_params(
+            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
+        ).x
+        logm = np.log10(np.asarray(masses).ravel())
+        return list(base) + [float(logm.min()) - 1.0, float(logm.max()) + 1.0]
+    if lower == "chabrier_exp_bounds":
+        base = imf_mostlikely_params(
+            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
+        ).x
+        logm0, logsigma, alpha = base
+        sigma = float(np.exp(logsigma))
+        logmbreak = float(logm0) - float(alpha) * sigma * sigma * float(np.log(10.0))
+        logm = np.log10(np.asarray(masses).ravel())
+        return list(base) + [logmbreak, float(logm.min()) - 1.0, float(logm.max()) + 1.0]
     return imf_default_params(model)
 
 

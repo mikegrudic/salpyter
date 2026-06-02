@@ -30,8 +30,10 @@ from .default_imf_params import (  # noqa: E402
     imf_default_params,
 )
 from .imfs import (  # noqa: E402
+    chabrier_exp_bounds_imf,
     chabrier_imf,
     chabrier_smooth_bounds_imf,
+    chabrier_smooth_exp_bounds_imf,
     chabrier_smooth_imf,
 )
 from .likelihood import _MODEL_TO_FUNC, imf_lnprob, imf_mostlikely_params  # noqa: E402
@@ -59,8 +61,10 @@ __all__ = [
     "DEFAULT_LOGMMIN",
     "DEFAULT_MODEL",
     "IMF_LIST",
+    "chabrier_exp_bounds_imf",
     "chabrier_imf",
     "chabrier_smooth_bounds_imf",
+    "chabrier_smooth_exp_bounds_imf",
     "chabrier_smooth_imf",
     "get_imf_function",
     "imf_default_bounds",

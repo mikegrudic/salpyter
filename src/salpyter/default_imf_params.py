@@ -28,6 +28,16 @@ DEFAULT_IMF_PARAMS = {
     "chabrier_smooth_bounds": (
         CHABRIER_SMOOTH_DEFAULT_PARAMS + [float(DEFAULT_LOGMMIN), float(DEFAULT_LOGMMAX)]
     ),
+    # exp_bounds variants: same parameterization as bounds variants but with
+    # smooth Schechter cutoffs instead of hard limits. Defaults set the cutoff
+    # masses to the imf_samples sampling range, so the cutoffs are exp(-1)
+    # at the edges of where the rejection sampler draws.
+    "chabrier_smooth_exp_bounds": (
+        CHABRIER_SMOOTH_DEFAULT_PARAMS + [float(DEFAULT_LOGMMIN), float(DEFAULT_LOGMMAX)]
+    ),
+    "chabrier_exp_bounds": (
+        CHABRIER_DEFAULT_PARAMS + [float(DEFAULT_LOGMMIN), float(DEFAULT_LOGMMAX)]
+    ),
 }
 
 DEFAULT_IMF_PARAMS_BOUNDS = {
@@ -37,6 +47,13 @@ DEFAULT_IMF_PARAMS_BOUNDS = {
     # chabrier_smooth_bounds adds prior bounds on the sampled IMF support.
     "chabrier_smooth_bounds": [
         [-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-4.0, 4.0], [-4.0, 4.0],
+    ],
+    # exp_bounds variants: same prior boxes as the hard-bounds versions.
+    "chabrier_smooth_exp_bounds": [
+        [-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-4.0, 4.0], [-4.0, 4.0],
+    ],
+    "chabrier_exp_bounds": [
+        [-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-3.0, 3.0], [-4.0, 4.0], [-4.0, 4.0],
     ],
 }
 

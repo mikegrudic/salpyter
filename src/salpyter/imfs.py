@@ -217,3 +217,132 @@ def chabrier_smooth_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     norm = lognormal_norm + powerlaw_norm
 
     return imf_pre / norm
+
+
+# Number of log-mass grid points used by the *_exp_bounds models for numerical
+# normalization. 501 spans ~10 decades at 0.02-decade resolution, plenty to
+# resolve the exp cutoff transition (which happens over ~1 decade).
+_EXP_NORM_NGRID = 501
+# Margin (in log10 mass) on each side of [logmmin, logmmax] for the
+# normalization integration domain. 5 decades is enough for the cutoff to
+# decay to exp(-1e5), entirely negligible.
+_EXP_NORM_MARGIN = 5.0
+
+
+def _chabrier_smooth_shape_unnorm(logm, logm0, logsigma, alpha):
+    """chabrier_smooth unnormalized shape (smooth-break condition)."""
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    logmbreak = logm0 - alpha * sigma * sigma * _LN10
+    mbreak = 10.0**logmbreak
+
+    z = (logm - logm0) * inv_sigma
+    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
+
+    z_break = (logmbreak - logm0) * inv_sigma
+    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
+    m = 10.0**logm
+    powerlaw = normal_at_break * (m / mbreak) ** alpha
+    return jnp.where(logm > logmbreak, powerlaw, lognormal)
+
+
+def _chabrier_shape_unnorm(logm, logm0, logsigma, alpha, logmbreak):
+    """chabrier unnormalized shape (free logmbreak, no smooth condition)."""
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    mbreak = 10.0**logmbreak
+
+    z = (logm - logm0) * inv_sigma
+    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
+
+    z_break = (logmbreak - logm0) * inv_sigma
+    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
+    m = 10.0**logm
+    powerlaw = normal_at_break * (m / mbreak) ** alpha
+    return jnp.where(logm > logmbreak, powerlaw, lognormal)
+
+
+def _schechter_cutoff(logm, logmmin, logmmax):
+    """Smooth Schechter-style cutoff: exp(-m_min/m - m/m_max) in log space.
+
+    Equal to ~1 well inside [logmmin, logmmax], exp(-1) ≈ 0.37 at each cutoff
+    itself, decays exponentially outside. Smooth everywhere (NUTS-safe).
+    """
+    return jnp.exp(-(10.0 ** (logmmin - logm)) - (10.0 ** (logm - logmmax)))
+
+
+def _exp_bounds_norm(shape_fn, cutoff_fn, logmmin_p, logmmax_p):
+    """Numerical normalization integral over a wide log-mass grid."""
+    grid_logm = jnp.linspace(
+        logmmin_p - _EXP_NORM_MARGIN,
+        logmmax_p + _EXP_NORM_MARGIN,
+        _EXP_NORM_NGRID,
+    )
+    return jnp.trapezoid(shape_fn(grid_logm) * cutoff_fn(grid_logm), grid_logm)
+
+
+def chabrier_smooth_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """chabrier_smooth IMF with Schechter-style exponential mass cutoffs.
+
+    Replaces the hard ``imf=0 outside [logmmin, logmmax]`` step in
+    ``chabrier_smooth_bounds_imf`` with the smooth Schechter-like factor
+    ``exp(-m_min/m - m/m_max)``. The cutoff is ~1 well inside ``[m_min, m_max]``,
+    exp(-1) ≈ 0.37 at each cutoff itself, and decays exponentially outside.
+    Because the integral is no longer analytic, normalization is computed
+    numerically by trapezoidal integration over a 501-point log-mass grid.
+
+    The ``logmmin``/``logmmax`` keyword arguments are accepted for signature
+    parity with the other IMF functions but are ignored; the cutoffs are taken
+    from ``params``.
+
+    Parameters
+    ----------
+    params : array_like, shape (5,)
+        ``[logm0, logsigma, alpha, logmmin, logmmax]``.
+    """
+    del logmmin, logmmax
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    alpha = params[2]
+    logmmin_p = params[3]
+    logmmax_p = params[4]
+
+    def shape(lm):
+        return _chabrier_smooth_shape_unnorm(lm, logm0, logsigma, alpha)
+
+    def cutoff(lm):
+        return _schechter_cutoff(lm, logmmin_p, logmmax_p)
+
+    return shape(logm) * cutoff(logm) / _exp_bounds_norm(shape, cutoff, logmmin_p, logmmax_p)
+
+
+def chabrier_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """chabrier IMF (free logmbreak) with Schechter-style exponential cutoffs.
+
+    Same idea as ``chabrier_smooth_exp_bounds_imf`` but with a free high-mass
+    break (chabrier rather than chabrier_smooth shape).
+
+    Parameters
+    ----------
+    params : array_like, shape (6,)
+        ``[logm0, logsigma, alpha, logmbreak, logmmin, logmmax]``.
+    """
+    del logmmin, logmmax
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    alpha = params[2]
+    logmbreak = params[3]
+    logmmin_p = params[4]
+    logmmax_p = params[5]
+
+    def shape(lm):
+        return _chabrier_shape_unnorm(lm, logm0, logsigma, alpha, logmbreak)
+
+    def cutoff(lm):
+        return _schechter_cutoff(lm, logmmin_p, logmmax_p)
+
+    return shape(logm) * cutoff(logm) / _exp_bounds_norm(shape, cutoff, logmmin_p, logmmax_p)
