@@ -6,7 +6,7 @@ The IMF models themselves are now registered inline in ``imfs.py`` via
 """
 
 from . import imfs
-from .model import Cutoff
+from .model import Cutoff, piecewise, register
 
 # Schechter cutoff for ``model * schechter`` composition.
 schechter = Cutoff(
@@ -30,3 +30,18 @@ chabrier_smooth_bounds = _REGISTRY["chabrier_smooth_bounds"]
 chabrier_smooth_exp_bounds = _REGISTRY["chabrier_smooth_exp_bounds"]
 chabrier_exp_bounds = _REGISTRY["chabrier_exp_bounds"]
 powerlaw = _REGISTRY["powerlaw"]
+
+
+# ---------------------------------------------------------------------------
+# Composed models registered under conventional astronomical names.
+# ---------------------------------------------------------------------------
+
+# Kroupa (2001) IMF as three free-slope, free-break power-law segments. The
+# composition is C0 continuous at each break (cascading scales in piecewise);
+# breaks are sampled via the delta reparameterization so they are always
+# ordered. Five parameters: ("slope", "slope", "slope", "logmbreak_1",
+# "logmbreak_2"). The bounded variant is just ``kroupa.truncate()``.
+kroupa = register(
+    piecewise(powerlaw, powerlaw, powerlaw),
+    "kroupa",
+)

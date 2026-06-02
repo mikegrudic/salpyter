@@ -57,6 +57,7 @@ from .registry import (  # noqa: E402
     chabrier_smooth as _chabrier_smooth_model,
     chabrier_smooth_bounds as _chabrier_smooth_bounds_model,
     chabrier_smooth_exp_bounds as _chabrier_smooth_exp_bounds_model,
+    kroupa,
     powerlaw as _powerlaw_model,
     schechter,
 )
@@ -108,6 +109,7 @@ __all__ = [
     "IMFModel",
     "all_models",
     "imf_model",
+    "kroupa",
     "piecewise",
     "register",
     "schechter",

@@ -49,8 +49,16 @@ _REGISTRY: dict[str, "IMFModel"] = {}
 
 
 def register(model: "IMFModel", name: Optional[str] = None) -> "IMFModel":
-    """Add a model to the global registry under ``name`` (or ``model.name``)."""
-    key = name if name is not None else model.name
+    """Add a model to the global registry under ``name`` (or ``model.name``).
+
+    When ``name`` is provided and differs from ``model.name``, the model is
+    rebuilt with the new name so the registry key and ``model.name`` stay in
+    sync (the IMFModel dataclass is frozen).
+    """
+    if name is not None and name != model.name:
+        import dataclasses
+        model = dataclasses.replace(model, name=name)
+    key = model.name
     if key in _REGISTRY:
         raise ValueError(f"model {key!r} is already registered")
     _REGISTRY[key] = model
