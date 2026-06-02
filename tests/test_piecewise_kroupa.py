@@ -100,11 +100,6 @@ def _plot_kroupa_posterior(model, masses, samples, outpath, num_lines=100):
         imf_vals = np.asarray(model.imf_fn(jnp.asarray(logm_grid), jnp.asarray(s), -3.0, 4.0))
         ax.plot(mgrid, imf_vals * imf_to_bins, color="steelblue", lw=0.15, alpha=0.2)
 
-    # One reference posterior median for the label, plotted slightly bolder.
-    median = np.median(samples, axis=0)
-    imf_med = np.asarray(model.imf_fn(jnp.asarray(logm_grid), jnp.asarray(median), -3.0, 4.0))
-    ax.plot(mgrid, imf_med * imf_to_bins, color="crimson", lw=1.5, label="posterior median")
-
     ax.set(
         xscale="log", yscale="log",
         xlim=[5e-3, 200],
