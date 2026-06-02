@@ -30,6 +30,19 @@ def _kroupa_true_params():
     return np.array([0.7, -0.3, -1.3, np.log10(0.08), np.log10(0.5), -2.0, 2.0], dtype=float)
 
 
+def test_piecewise_param_names_dedupe_only_when_duplicated():
+    """Duplicated component names get segment-suffixed; unique names pass through."""
+    # Three identical powerlaws -> three "slope_<idx>" names.
+    p3 = piecewise(salpyter.powerlaw_imf, salpyter.powerlaw_imf, salpyter.powerlaw_imf)
+    assert p3.param_names[:3] == ("slope_1", "slope_2", "slope_3")
+
+    # Mixed unique-name components -> no suffixing on uniquely-named params.
+    mix = piecewise(salpyter.chabrier_smooth_imf, salpyter.powerlaw_imf)
+    # chabrier_smooth has ("logm0", "logsigma", "alpha"); powerlaw has ("slope",).
+    # None of these names collide, so all stay clean.
+    assert mix.param_names[:4] == ("logm0", "logsigma", "alpha", "slope")
+
+
 def test_ordered_piecewise_log_jacobian_matches_autodiff():
     """The analytic log_jacobian_fn agrees with the autodiff log|det J|."""
     import jax
@@ -112,8 +125,15 @@ def test_return_dict_for_piecewise():
         masses, model=kroupa, p0=true_p,
         num_warmup=100, num_samples=200, seed=0, return_dict=True,
     )
-    expected_keys = {"slope", "logmbreak_1", "logmbreak_2", "logmmin", "logmmax"}
-    # "slope" appears 3 times in param_names — return_dict only gets the last
-    # occurrence under that key because dicts dedupe. Document this behavior:
+    # With the auto-suffix in piecewise, the three "slope" entries become
+    # slope_1, slope_2, slope_3 — no dedupe collisions. All 7 params come back
+    # under distinct keys.
+    expected_keys = {
+        "slope_1", "slope_2", "slope_3",
+        "logmbreak_1", "logmbreak_2",
+        "logmmin", "logmmax",
+    }
     assert isinstance(out, dict)
-    assert expected_keys.issubset(out.keys()) or "slope" in out
+    assert set(out.keys()) == expected_keys
+    for v in out.values():
+        assert v.shape == (200,)

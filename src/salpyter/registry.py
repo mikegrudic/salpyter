@@ -36,11 +36,24 @@ powerlaw = _REGISTRY["powerlaw"]
 # Composed models registered under conventional astronomical names.
 # ---------------------------------------------------------------------------
 
+# Salpeter (1955): a single power-law segment. ``salpeter`` is just the
+# already-registered ``powerlaw`` model under a more conventional name. The
+# IMF math is identical; the default slope of -1.3 (in dN/d(log10 m) units)
+# corresponds to dN/dm ∝ m^-2.3, slightly shallower than the canonical
+# Salpeter -2.35 but inside the bounds box so the MAP/NUTS can recover it.
+salpeter = register(powerlaw, "salpeter")
+
+# Scalo (1986)-style two-segment broken power law: a low-mass and a high-mass
+# power-law joined at a free break. Three parameters total:
+# ("slope_1", "slope_2", "logmbreak_1"). Use ``.truncate()`` for the bounded
+# variant or ``* schechter`` for a smooth high-mass cutoff.
+scalo = register(piecewise(powerlaw, powerlaw), "scalo")
+
 # Kroupa (2001) IMF as three free-slope, free-break power-law segments. The
 # composition is C0 continuous at each break (cascading scales in piecewise);
 # breaks are sampled via the delta reparameterization so they are always
-# ordered. Five parameters: ("slope", "slope", "slope", "logmbreak_1",
-# "logmbreak_2"). The bounded variant is just ``kroupa.truncate()``.
+# ordered. Seven parameters: three slopes + two free breaks. The bounded
+# variant is just ``kroupa.truncate()``.
 kroupa = register(
     piecewise(powerlaw, powerlaw, powerlaw),
     "kroupa",

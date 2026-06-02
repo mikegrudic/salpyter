@@ -59,6 +59,8 @@ from .registry import (  # noqa: E402
     chabrier_smooth_exp_bounds as _chabrier_smooth_exp_bounds_model,
     kroupa,
     powerlaw as _powerlaw_model,
+    salpeter,
+    scalo,
     schechter,
 )
 from .likelihood import imf_lnprob, imf_mostlikely_params  # noqa: E402
@@ -112,6 +114,8 @@ __all__ = [
     "kroupa",
     "piecewise",
     "register",
+    "salpeter",
+    "scalo",
     "schechter",
     # Functions
     "get_imf_function",

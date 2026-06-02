@@ -363,11 +363,24 @@ def piecewise(
     # Parameter metadata. Free breaks are always exposed as logmbreak_i in
     # param_names regardless of `ordered` — the reparameterization (when
     # ordered=True) happens transparently via from/to_unconstrained.
+    # Param names that appear in more than one component (e.g. "slope" in three
+    # powerlaw segments of a Kroupa IMF) are auto-suffixed with the segment
+    # index so the returned model has distinct names. Unique names pass through
+    # unmodified, so simple cases like piecewise(lognormal, powerlaw) still get
+    # readable names like ("logm0", "logsigma", "alpha", "slope").
+    from collections import Counter
+    _all_component_names = [n for m in models for n in m.param_names]
+    _name_counts = Counter(_all_component_names)
+
     param_names: list[str] = []
     default_params: list[float] = []
     default_bounds: list[tuple[float, float]] = []
-    for m in models:
-        param_names.extend(m.param_names)
+    for seg_idx, m in enumerate(models, start=1):
+        for name in m.param_names:
+            if _name_counts[name] > 1:
+                param_names.append(f"{name}_{seg_idx}")
+            else:
+                param_names.append(name)
         default_params.extend(m.default_params)
         default_bounds.extend(m.default_bounds)
     for i, b in enumerate(breaks):

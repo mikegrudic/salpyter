@@ -115,10 +115,14 @@ def _plot_kroupa_posterior(model, masses, samples, outpath, num_lines=100):
 
 
 def test_kroupa_param_names_and_dim():
-    """Sanity check that the composed model exposes the expected metadata."""
+    """Sanity check that the composed model exposes the expected metadata.
+
+    Duplicate component param names ("slope" appears in all three powerlaw
+    segments) are auto-suffixed with the 1-based segment index.
+    """
     m = _kroupa_model()
     expected_names = (
-        "slope", "slope", "slope",         # one per segment
+        "slope_1", "slope_2", "slope_3",   # auto-suffixed: same name from 3 segments
         "logmbreak_1", "logmbreak_2",      # from piecewise
         "logmmin", "logmmax",              # from truncate
     )
