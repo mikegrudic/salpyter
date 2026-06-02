@@ -9,11 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
 
-from .default_imf_params import (
-    DEFAULT_MODEL,
-    imf_default_bounds,
-    imf_default_params,
-)
+from .default_imf_params import DEFAULT_MODEL
 from .model import IMFModel, _REGISTRY
 
 
@@ -47,62 +43,17 @@ _MODEL_TO_FUNC = {name: m.imf_fn for name, m in _REGISTRY.items()}
 def _bootstrap_p0(masses, model, logmmin=None, logmmax=None):
     """Pick a sensible starting point for the MAP optimizer.
 
-    Without bootstrapping, the bounded model's MAP from
-    ``imf_default_params`` lands in a wrong local mode (narrow lognormal +
-    loose bounds) that has ~150 lower log-likelihood than the global mode
-    (wide lognormal + bounds pinned at the data extrema). L-BFGS-B can't
-    cross between modes because the gradient kicks in only when bounds
-    cross the data extrema. So we first fit the 3-param chabrier_smooth
-    model (well-behaved, no bound parameters), then extend its solution
-    with bound values right at the data extrema. Same trick the master
-    branch uses for chabrier-from-chabrier_smooth.
+    Each registered :class:`IMFModel` carries its own ``bootstrap_fn`` (set
+    via the ``@imf_model`` decorator in ``imfs.py``); we just look up the
+    model and call it. Without a bootstrap, the bounded models' MAPs from
+    ``default_params`` land in the wrong local mode (narrow lognormal + loose
+    bounds, ~150 lower log-likelihood than the global mode of wide lognormal
+    + bounds at the data extrema).
     """
-    if isinstance(model, IMFModel):
-        if model.bootstrap_fn is not None:
-            return model.bootstrap_fn(masses, logmmin, logmmax)
-        return list(model.default_params)
-    lower = model.lower()
-    if lower == "chabrier_smooth_bounds":
-        base = imf_mostlikely_params(
-            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
-        ).x
-        logm = np.log10(np.asarray(masses).ravel())
-        # Set bounds just outside the data extrema; the small margin keeps the
-        # data strictly inside [logmmin, logmmax] (the boundary in
-        # chabrier_smooth_bounds_imf uses >=/<=, but the margin avoids any
-        # floating-point edge case at the L-BFGS-B starting evaluation).
-        margin = 1e-3
-        return list(base) + [float(logm.min()) - margin, float(logm.max()) + margin]
-    if lower == "chabrier":
-        base = imf_mostlikely_params(
-            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
-        ).x
-        # Use the chabrier_smooth break point as the default free logmbreak.
-        logm0, logsigma, alpha = base
-        sigma = float(np.exp(logsigma))
-        logmbreak = float(logm0) - float(alpha) * sigma * sigma * float(np.log(10.0))
-        return list(base) + [logmbreak]
-    if lower == "chabrier_smooth_exp_bounds":
-        # Same shape bootstrap as the hard-bounds version, but initialize the
-        # exp cutoffs *outside* the data range so they don't suppress data
-        # at the starting point. exp(-1) cutoff at logmmin sits right at data
-        # min, so we put logmmin a decade below to keep the cutoff out of the
-        # data range during the first MAP evaluation.
-        base = imf_mostlikely_params(
-            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
-        ).x
-        logm = np.log10(np.asarray(masses).ravel())
-        return list(base) + [float(logm.min()) - 1.0, float(logm.max()) + 1.0]
-    if lower == "chabrier_exp_bounds":
-        base = imf_mostlikely_params(
-            masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax,
-        ).x
-        logm0, logsigma, alpha = base
-        sigma = float(np.exp(logsigma))
-        logmbreak = float(logm0) - float(alpha) * sigma * sigma * float(np.log(10.0))
-        logm = np.log10(np.asarray(masses).ravel())
-        return list(base) + [logmbreak, float(logm.min()) - 1.0, float(logm.max()) + 1.0]
-    return imf_default_params(model)
+    resolved = _resolve_model(model)
+    if resolved.bootstrap_fn is not None:
+        return resolved.bootstrap_fn(masses, logmmin, logmmax)
+    return list(resolved.default_params)
 
 
 def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):

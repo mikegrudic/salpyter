@@ -69,7 +69,23 @@ def all_models() -> dict[str, "IMFModel"]:
 
 @dataclass(frozen=True)
 class IMFModel:
-    """A named IMF model: pure JAX function + parameter metadata."""
+    """A named IMF model: pure JAX function + parameter metadata.
+
+    Parameters
+    ----------
+    from_unconstrained : callable, optional
+        ``(p_unconstrained) -> p_user`` that maps the parameter vector NUTS
+        samples in (the "unconstrained" space) to the user-facing
+        representation that ``param_names`` describes. Default identity.
+    to_unconstrained : callable, optional
+        Inverse of ``from_unconstrained`` — used to convert a user-supplied
+        ``p0`` into the sampler's coordinate system. Default identity.
+
+    These hooks let composite models (notably :func:`piecewise` with
+    ``ordered=True``) sample in a reparameterized space (e.g. deltas
+    instead of absolute breaks) while keeping ``param_names`` and the
+    posterior samples in their natural user-facing scale.
+    """
 
     name: str
     imf_fn: Callable[..., jnp.ndarray]
@@ -77,6 +93,8 @@ class IMFModel:
     default_params: tuple[float, ...]
     default_bounds: tuple[tuple[float, float], ...]
     bootstrap_fn: Optional[Callable[..., list[float]]] = field(default=None, repr=False)
+    from_unconstrained: Optional[Callable[..., jnp.ndarray]] = field(default=None, repr=False)
+    to_unconstrained: Optional[Callable[..., jnp.ndarray]] = field(default=None, repr=False)
 
     def __post_init__(self):
         n = len(self.param_names)
@@ -90,6 +108,10 @@ class IMFModel:
     @property
     def ndim(self) -> int:
         return len(self.param_names)
+
+    @property
+    def has_reparam(self) -> bool:
+        return self.from_unconstrained is not None and self.to_unconstrained is not None
 
     def __call__(self, logm, params, logmmin=-jnp.inf, logmmax=4.0):
         return self.imf_fn(logm, params, logmmin, logmmax)
@@ -228,6 +250,7 @@ class Cutoff:
 def piecewise(
     *models: IMFModel,
     breaks: Optional[Sequence[Optional[float]]] = None,
+    ordered: bool = True,
 ) -> IMFModel:
     """Build an N-segment piecewise IMF with C0 continuity enforced at breaks.
 
@@ -239,6 +262,15 @@ def piecewise(
         Each entry is either a float (fixed break point in log10 mass) or
         ``None`` (becomes a free parameter named ``"logmbreak_<i>"``).
         Default ``None`` means all breaks are free.
+    ordered : bool, default True
+        When True, free breaks are internally reparameterized as deltas
+        (the i-th free break is ``lb_{i-1} + exp(raw_i)`` for i >= 1, so
+        breaks are strictly increasing by construction). NUTS samples the
+        deltas; the returned model still exposes the natural
+        ``logmbreak_i`` names and posterior samples are transformed back
+        into that space transparently. When False, free breaks are sampled
+        directly — ordering must be enforced manually via the prior
+        bounds, and label-swap degeneracy is possible.
 
     Notes
     -----
@@ -249,12 +281,6 @@ def piecewise(
 
     The resulting piecewise function is then trapz-normalized over
     ``[logmmin, logmmax]``.
-
-    Ordering of free breaks is enforced *only* by the per-break prior box
-    you set in ``default_bounds`` of the wrapping model; NUTS proposals
-    landing in an unsorted region will give a degenerate likelihood but no
-    runtime error. (See plan Phase 2.6 for a delta-reparameterization that
-    makes ordering automatic.)
     """
     if len(models) < 2:
         raise ValueError("piecewise needs at least 2 models")
@@ -322,7 +348,9 @@ def piecewise(
         norm = jnp.trapezoid(piecewise_at(grid), grid)
         return piecewise_at(jnp.asarray(logm)) / norm
 
-    # Parameter metadata.
+    # Parameter metadata. Free breaks are always exposed as logmbreak_i in
+    # param_names regardless of `ordered` — the reparameterization (when
+    # ordered=True) happens transparently via from/to_unconstrained.
     param_names: list[str] = []
     default_params: list[float] = []
     default_bounds: list[tuple[float, float]] = []
@@ -337,12 +365,53 @@ def piecewise(
             default_params.append(float(-2 + 4 * (i + 1) / N))
             default_bounds.append((-4.0, 4.0))
 
+    # Delta reparameterization for ordered free breaks.
+    #
+    # The IMF function above always operates on the *user-facing* parameter
+    # vector (ordered logmbreak_i values). When `ordered=True`, NUTS samples in
+    # a different ("unconstrained") space where the trailing free-break entries
+    # are interpreted as (logmbreak_1, log_delta_1, log_delta_2, ...), and a
+    # cumulative-exp converts them back to (logmbreak_1, logmbreak_2, ...)
+    # before the prior box and the imf_fn see them. By construction the deltas
+    # are positive (exp), so breaks are strictly increasing — no label-swap
+    # degeneracy, no need to constrain ordering via the prior bounds.
+    from_unc = None
+    to_unc = None
+    if ordered and n_free_breaks >= 2:
+        n_total = n_model_params + n_free_breaks
+        anchor_idx = n_model_params  # index of logmbreak_1 (absolute)
+
+        def from_unconstrained(p_unc):
+            """(.., lb_1, log_d_1, log_d_2, ..) -> (.., lb_1, lb_2, lb_3, ..)."""
+            p_unc = jnp.asarray(p_unc)
+            head = p_unc[:anchor_idx]
+            anchor = p_unc[anchor_idx]
+            raw_deltas = p_unc[anchor_idx + 1 : anchor_idx + n_free_breaks]
+            deltas = jnp.exp(raw_deltas)
+            breaks_user = anchor + jnp.concatenate([jnp.zeros(1), jnp.cumsum(deltas)])
+            return jnp.concatenate([head, breaks_user])
+
+        def to_unconstrained(p_user):
+            """(.., lb_1, lb_2, lb_3, ..) -> (.., lb_1, log_d_1, log_d_2, ..)."""
+            p_user = jnp.asarray(p_user)
+            head = p_user[:anchor_idx]
+            anchor = p_user[anchor_idx]
+            breaks_tail = p_user[anchor_idx + 1 : anchor_idx + n_free_breaks]
+            diffs = breaks_tail - jnp.concatenate([anchor[None], breaks_tail[:-1]])
+            raw_deltas = jnp.log(jnp.maximum(diffs, 1e-300))
+            return jnp.concatenate([head, anchor[None], raw_deltas])
+
+        from_unc = from_unconstrained
+        to_unc = to_unconstrained
+
     return IMFModel(
         name=f"piecewise({','.join(m.name for m in models)})",
         imf_fn=imf_fn,
         param_names=tuple(param_names),
         default_params=tuple(default_params),
         default_bounds=tuple(default_bounds),
+        from_unconstrained=from_unc,
+        to_unconstrained=to_unc,
     )
 
 
@@ -359,7 +428,14 @@ def imf_model(
     default_bounds: Sequence[tuple[float, float]],
     bootstrap_fn: Optional[Callable[..., list[float]]] = None,
 ) -> Callable[[Callable], IMFModel]:
-    """Decorator that wraps a JAX IMF function into a registered :class:`IMFModel`."""
+    """Decorator that wraps a JAX IMF function into a registered :class:`IMFModel`.
+
+    The decorated name is bound to the IMFModel (not the original function);
+    calls like ``chabrier_smooth_imf(logm, params)`` still work because
+    ``IMFModel.__call__`` forwards to ``imf_fn``. The original function's
+    docstring is preserved on the returned model so ``help(...)`` and
+    Sphinx pick it up.
+    """
 
     def wrap(fn: Callable) -> IMFModel:
         model = IMFModel(
@@ -371,6 +447,10 @@ def imf_model(
             bootstrap_fn=bootstrap_fn,
         )
         register(model)
+        # Preserve the original function's docstring on the returned IMFModel
+        # (frozen dataclass → use object.__setattr__).
+        if fn.__doc__:
+            object.__setattr__(model, "__doc__", fn.__doc__)
         return model
 
     return wrap

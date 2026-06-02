@@ -38,6 +38,7 @@ DEFAULT_IMF_PARAMS = {
     "chabrier_exp_bounds": (
         CHABRIER_DEFAULT_PARAMS + [float(DEFAULT_LOGMMIN), float(DEFAULT_LOGMMAX)]
     ),
+    "powerlaw": [-1.3],
 }
 
 DEFAULT_IMF_PARAMS_BOUNDS = {
@@ -55,6 +56,7 @@ DEFAULT_IMF_PARAMS_BOUNDS = {
     "chabrier_exp_bounds": [
         [-2.0, 2.0], [-2.0, 2.0], [-10.0, 2.0], [-3.0, 3.0], [-4.0, 4.0], [-4.0, 4.0],
     ],
+    "powerlaw": [[-10.0, 5.0]],
 }
 
 

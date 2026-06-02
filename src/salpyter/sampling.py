@@ -72,6 +72,7 @@ def imf_lnprob_samples(
     logmmax=None,
     target_acceptance: float = 0.8,
     perturbation_scale=None,
+    return_dict: bool = False,
 ):
     """Posterior samples of IMF parameters via multi-chain NUTS (blackjax).
 
@@ -120,10 +121,15 @@ def imf_lnprob_samples(
         cross-mode exploration of typical bounded-IMF posteriors, narrow
         enough that most chains start in a reasonable-likelihood region.
         Ignored when ``num_chains == 1``.
+    return_dict : bool, default False
+        If True, return ``{param_name: samples_array}`` keyed by the
+        model's ``param_names`` instead of an unnamed 2-D array. Backward-
+        compatible default is the array form.
 
     Returns
     -------
-    samples : np.ndarray, shape (num_samples_total, ndim)
+    samples : np.ndarray of shape ``(num_samples_total, ndim)`` (default)
+        or ``dict[str, np.ndarray]`` if ``return_dict=True``.
     """
     resolved = _resolve_model(model)
     imf_fn = resolved.imf_fn
@@ -145,7 +151,17 @@ def imf_lnprob_samples(
     lo = jnp.asarray(bounds_arr[:, 0], dtype=jnp.float64)
     hi = jnp.asarray(bounds_arr[:, 1], dtype=jnp.float64)
 
-    def lnprob(p):
+    # When the model declares a coordinate reparameterization (e.g.
+    # piecewise(ordered=True)), NUTS samples in the *unconstrained* space and
+    # we transform to the user-facing space (where ``param_names``,
+    # ``default_bounds``, and ``imf_fn`` all live) inside ``lnprob``. The same
+    # transform is applied to the output samples at the end so the user only
+    # ever sees the natural-scale representation.
+    from_unc = resolved.from_unconstrained
+    to_unc = resolved.to_unconstrained
+
+    def lnprob(p_sample):
+        p = from_unc(p_sample) if from_unc is not None else p_sample
         imf_val = imf_fn(logm, p, lmin, lmax)
         log_imf = jnp.log(jnp.clip(imf_val, 1e-300, None))
         ll = jnp.sum(log_imf)
@@ -158,6 +174,8 @@ def imf_lnprob_samples(
         sol = imf_mostlikely_params(masses, model, logmmin=lmin, logmmax=lmax)
         p0 = sol.x
     p0_arr = jnp.asarray(p0, dtype=jnp.float64)
+    if to_unc is not None:
+        p0_arr = to_unc(p0_arr)
     ndim = p0_arr.shape[0]
 
     num_chains = max(1, int(num_chains))
@@ -207,4 +225,12 @@ def imf_lnprob_samples(
         # Shape (num_chains, samples_per_chain, ndim) -> (total, ndim).
         all_samples = all_samples.reshape(-1, ndim)
 
-    return np.asarray(all_samples)
+    # Transform samples back into the user-facing parameter space (e.g. deltas
+    # -> ordered logmbreak values for ordered piecewise models).
+    if from_unc is not None:
+        all_samples = jax.vmap(from_unc)(all_samples)
+
+    samples_np = np.asarray(all_samples)
+    if return_dict:
+        return {name: samples_np[:, i] for i, name in enumerate(resolved.param_names)}
+    return samples_np

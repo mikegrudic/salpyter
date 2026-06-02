@@ -1,21 +1,77 @@
-"""Differentiable JAX IMF functions.
+"""Differentiable JAX IMF functions, each decorated with ``@imf_model`` to
+auto-register a callable :class:`~salpyter.model.IMFModel` under the function's
+public name.
 
-Each IMF takes ``logm`` (log10 mass), a ``params`` vector, and scalar mass-range
-bounds ``logmmin``/``logmmax`` defining the normalization range. It returns the
-IMF value (normalized to integrate to 1 over [logmmin, logmmax] with respect to
-log10(m)).
+Each underlying IMF takes ``logm`` (log10 mass), a ``params`` vector, and scalar
+mass-range bounds ``logmmin``/``logmmax`` defining the normalization range. It
+returns the IMF value (normalized to integrate to 1 over [logmmin, logmmax]
+with respect to log10(m)).
 
-All functions are pure JAX and safe to ``jit``, ``grad``, and ``vmap``.
+All functions are pure JAX and safe to ``jit``, ``grad``, and ``vmap``. After
+decoration, ``chabrier_smooth_imf`` (etc.) is an ``IMFModel`` instance that is
+*still callable* via ``__call__``, so direct calls like
+``chabrier_smooth_imf(logm, params)`` keep working.
 """
 
+import numpy as np
 import jax.numpy as jnp
 from jax.scipy.special import erf
+
+from .default_imf_params import DEFAULT_IMF_PARAMS, DEFAULT_IMF_PARAMS_BOUNDS
+from .model import imf_model
 
 _LN10 = jnp.log(10.0)
 _SQRT2 = jnp.sqrt(2.0)
 _INV_SQRT_2PI = 1.0 / jnp.sqrt(2.0 * jnp.pi)
 
 
+# --------------------------------------------------------------------------- #
+# Bootstrap functions for the bounded models.                                 #
+# --------------------------------------------------------------------------- #
+# These move the per-model MAP-initialization rules from likelihood._bootstrap_p0
+# onto the IMFModel objects themselves. They use lazy imports of
+# imf_mostlikely_params to avoid a circular import (likelihood -> imfs -> ...).
+
+
+def _bootstrap_chabrier(masses, logmmin, logmmax):
+    from .likelihood import imf_mostlikely_params
+    base = imf_mostlikely_params(masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax).x
+    logm0, logsigma, alpha = [float(x) for x in base]
+    sigma = float(np.exp(logsigma))
+    logmbreak = logm0 - alpha * sigma * sigma * float(np.log(10.0))
+    return [logm0, logsigma, alpha, logmbreak]
+
+
+def _bootstrap_chabrier_smooth_bounds(masses, logmmin, logmmax):
+    from .likelihood import imf_mostlikely_params
+    base = imf_mostlikely_params(masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax).x
+    logm = np.log10(np.asarray(masses).ravel())
+    return [float(x) for x in base] + [float(logm.min()) - 1e-3, float(logm.max()) + 1e-3]
+
+
+def _bootstrap_chabrier_smooth_exp_bounds(masses, logmmin, logmmax):
+    from .likelihood import imf_mostlikely_params
+    base = imf_mostlikely_params(masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax).x
+    logm = np.log10(np.asarray(masses).ravel())
+    return [float(x) for x in base] + [float(logm.min()) - 1.0, float(logm.max()) + 1.0]
+
+
+def _bootstrap_chabrier_exp_bounds(masses, logmmin, logmmax):
+    from .likelihood import imf_mostlikely_params
+    base = imf_mostlikely_params(masses, "chabrier_smooth", logmmin=logmmin, logmmax=logmmax).x
+    logm0, logsigma, alpha = [float(x) for x in base]
+    sigma = float(np.exp(logsigma))
+    logmbreak = logm0 - alpha * sigma * sigma * float(np.log(10.0))
+    logm = np.log10(np.asarray(masses).ravel())
+    return [logm0, logsigma, alpha, logmbreak, float(logm.min()) - 1.0, float(logm.max()) + 1.0]
+
+
+@imf_model(
+    name="chabrier_smooth",
+    param_names=("logm0", "logsigma", "alpha"),
+    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier_smooth"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth"]),
+)
 def chabrier_smooth_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """Chabrier IMF with a smooth high-mass break.
 
@@ -91,6 +147,13 @@ def chabrier_smooth_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     return imf_pre / norm
 
 
+@imf_model(
+    name="chabrier",
+    param_names=("logm0", "logsigma", "alpha", "logmbreak"),
+    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier"]),
+    bootstrap_fn=_bootstrap_chabrier,
+)
 def chabrier_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """Chabrier IMF with a free high-mass break (4 parameters).
 
@@ -148,6 +211,13 @@ def chabrier_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     return imf_pre / norm
 
 
+@imf_model(
+    name="chabrier_smooth_bounds",
+    param_names=("logm0", "logsigma", "alpha", "logmmin", "logmmax"),
+    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier_smooth_bounds"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_bounds"]),
+    bootstrap_fn=_bootstrap_chabrier_smooth_bounds,
+)
 def chabrier_smooth_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """Chabrier-smooth IMF with sampled low/high-mass cutoffs (5 parameters).
 
@@ -281,6 +351,13 @@ def _exp_bounds_norm(shape_fn, cutoff_fn, logmmin_p, logmmax_p):
     return jnp.trapezoid(shape_fn(grid_logm) * cutoff_fn(grid_logm), grid_logm)
 
 
+@imf_model(
+    name="chabrier_smooth_exp_bounds",
+    param_names=("logm0", "logsigma", "alpha", "logmmin", "logmmax"),
+    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier_smooth_exp_bounds"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier_smooth_exp_bounds"]),
+    bootstrap_fn=_bootstrap_chabrier_smooth_exp_bounds,
+)
 def chabrier_smooth_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """chabrier_smooth IMF with Schechter-style exponential mass cutoffs.
 
@@ -318,6 +395,13 @@ def chabrier_smooth_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     return shape(logm) * cutoff(logm) / _exp_bounds_norm(shape, cutoff, logmmin_p, logmmax_p)
 
 
+@imf_model(
+    name="chabrier_exp_bounds",
+    param_names=("logm0", "logsigma", "alpha", "logmbreak", "logmmin", "logmmax"),
+    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier_exp_bounds"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier_exp_bounds"]),
+    bootstrap_fn=_bootstrap_chabrier_exp_bounds,
+)
 def chabrier_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """chabrier IMF (free logmbreak) with Schechter-style exponential cutoffs.
 
@@ -353,6 +437,12 @@ def chabrier_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
 # --------------------------------------------------------------------------- #
 
 
+@imf_model(
+    name="powerlaw",
+    param_names=("slope",),
+    default_params=tuple(DEFAULT_IMF_PARAMS["powerlaw"]),
+    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["powerlaw"]),
+)
 def powerlaw_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
     """Single power-law IMF in dN/d(log10 m) units.
 
