@@ -98,7 +98,7 @@ def _plot_kroupa_posterior(model, masses, samples, outpath, num_lines=100):
     # truncate-wrapped model (it derives them from params). Pass dummy values.
     for s in sub:
         imf_vals = np.asarray(model.imf_fn(jnp.asarray(logm_grid), jnp.asarray(s), -3.0, 4.0))
-        ax.plot(mgrid, imf_vals * imf_to_bins, color="steelblue", lw=0.3, alpha=0.4)
+        ax.plot(mgrid, imf_vals * imf_to_bins, color="steelblue", lw=0.15, alpha=0.2)
 
     # One reference posterior median for the label, plotted slightly bolder.
     median = np.median(samples, axis=0)
