@@ -9,30 +9,39 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
 
-from . import imfs
 from .default_imf_params import (
     DEFAULT_MODEL,
     imf_default_bounds,
     imf_default_params,
 )
+from .model import IMFModel, _REGISTRY
 
 
-_MODEL_TO_FUNC = {
-    "chabrier_smooth": imfs.chabrier_smooth_imf,
-    "chabrier": imfs.chabrier_imf,
-    "chabrier_smooth_bounds": imfs.chabrier_smooth_bounds_imf,
-    "chabrier_smooth_exp_bounds": imfs.chabrier_smooth_exp_bounds_imf,
-    "chabrier_exp_bounds": imfs.chabrier_exp_bounds_imf,
-}
+def _resolve_model(model):
+    """Return the :class:`IMFModel` for ``model``.
+
+    Accepts either a string registered in the model registry or an
+    ``IMFModel`` instance directly (so composed-on-the-fly models like
+    ``piecewise(...)`` work without registration).
+    """
+    if isinstance(model, IMFModel):
+        return model
+    if isinstance(model, str):
+        try:
+            return _REGISTRY[model.lower()]
+        except KeyError:
+            raise NotImplementedError(
+                f"unknown model {model!r}; registered: {sorted(_REGISTRY)}"
+            )
+    raise TypeError(f"model must be a string or IMFModel, got {type(model).__name__}")
 
 
 def _resolve_imf_func(model):
-    fn = _MODEL_TO_FUNC.get(model.lower())
-    if fn is None:
-        raise NotImplementedError(
-            f"jax salpyter supports {sorted(_MODEL_TO_FUNC)}; got {model!r}"
-        )
-    return fn
+    return _resolve_model(model).imf_fn
+
+
+# Backward-compatible dict view for any callers that import this directly.
+_MODEL_TO_FUNC = {name: m.imf_fn for name, m in _REGISTRY.items()}
 
 
 def _bootstrap_p0(masses, model, logmmin=None, logmmax=None):
@@ -48,6 +57,10 @@ def _bootstrap_p0(masses, model, logmmin=None, logmmax=None):
     with bound values right at the data extrema. Same trick the master
     branch uses for chabrier-from-chabrier_smooth.
     """
+    if isinstance(model, IMFModel):
+        if model.bootstrap_fn is not None:
+            return model.bootstrap_fn(masses, logmmin, logmmax)
+        return list(model.default_params)
     lower = model.lower()
     if lower == "chabrier_smooth_bounds":
         base = imf_mostlikely_params(
@@ -97,7 +110,7 @@ def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):
 
     Returns a scalar JAX array, safe to feed to ``jax.grad``.
     """
-    imf_fn = _resolve_imf_func(model)
+    imf_fn = _resolve_model(model).imf_fn
     logm = jnp.log10(jnp.asarray(masses).ravel())
     if logmmin is None:
         logmmin = jnp.min(logm)
@@ -135,9 +148,10 @@ def imf_mostlikely_params(
         p0 = _bootstrap_p0(masses, model, logmmin=logmmin, logmmax=logmmax)
     p0 = np.asarray(p0, dtype=np.float64)
     if bounds is None:
-        bounds = imf_default_bounds(model)
+        resolved = _resolve_model(model)
+        bounds = [list(b) for b in resolved.default_bounds]
 
-    imf_fn = _resolve_imf_func(model)
+    imf_fn = _resolve_model(model).imf_fn
     logm = jnp.log10(jnp.asarray(masses).ravel())
     lmin = jnp.min(logm) if logmmin is None else jnp.asarray(logmmin, dtype=jnp.float64)
     lmax = jnp.max(logm) if logmmax is None else jnp.asarray(logmmax, dtype=jnp.float64)

@@ -1,14 +1,16 @@
 """salpyter — differentiable IMF likelihoods and HMC posterior sampling.
 
 This is the ``jax`` branch implementation. The IMF math is written in JAX so
-log-likelihoods are differentiable; posterior sampling uses NUTS via blackjax,
-which exploits gradients to sample much more efficiently than the emcee
-ensemble sampler on the master branch.
+log-likelihoods are differentiable; posterior sampling uses NUTS via blackjax.
 
-MVP scope: ``chabrier_smooth`` only. Other models from the emcee branch
-(``chabrier``, ``chabrier_smooth_bounds``, the lognormal extensions) can be
-added by writing their IMF in JAX and registering them in :data:`IMF_LIST`
-and :func:`get_imf_function`.
+Public surface
+--------------
+* Legacy string-based API (mirrors master): ``imf_lnprob_samples(...,
+  model="chabrier_smooth")``, ``get_imf_function("chabrier_smooth")``,
+  ``IMF_LIST``, etc. Unchanged.
+* Object-based API (new): pass an :class:`~salpyter.model.IMFModel` directly
+  for ``model=``. Compose new models with ``+``, ``*``, ``.truncate()`` or
+  :func:`~salpyter.model.piecewise`.
 """
 
 # JAX defaults to float32; the small IMF values produced by the lognormal tail
@@ -18,6 +20,7 @@ import jax as _jax
 
 _jax.config.update("jax_enable_x64", True)
 
+# Order matters: model/registry must populate before likelihood/sampling import.
 from .default_imf_params import (  # noqa: E402
     CHABRIER_DEFAULT_PARAMS,
     CHABRIER_SMOOTH_DEFAULT_PARAMS,
@@ -35,24 +38,56 @@ from .imfs import (  # noqa: E402
     chabrier_smooth_bounds_imf,
     chabrier_smooth_exp_bounds_imf,
     chabrier_smooth_imf,
+    powerlaw_imf,
 )
-from .likelihood import _MODEL_TO_FUNC, imf_lnprob, imf_mostlikely_params  # noqa: E402
+from .model import (  # noqa: E402
+    Cutoff,
+    IMFModel,
+    all_models,
+    imf_model,
+    piecewise,
+    register,
+)
+# Importing registry has the side effect of registering all base + legacy
+# models in the global IMFModel registry.
+from . import registry  # noqa: E402, F401
+from .registry import (  # noqa: E402
+    chabrier as _chabrier_model,
+    chabrier_exp_bounds as _chabrier_exp_bounds_model,
+    chabrier_smooth as _chabrier_smooth_model,
+    chabrier_smooth_bounds as _chabrier_smooth_bounds_model,
+    chabrier_smooth_exp_bounds as _chabrier_smooth_exp_bounds_model,
+    powerlaw as _powerlaw_model,
+    schechter,
+)
+from .likelihood import imf_lnprob, imf_mostlikely_params  # noqa: E402
 from .sampling import imf_lnprob_samples, imf_samples  # noqa: E402
-
-IMF_LIST = list(_MODEL_TO_FUNC.keys())
 
 
 def get_imf_function(model: str):
     """Return the JAX-callable IMF function for ``model``."""
-    fn = _MODEL_TO_FUNC.get(model.lower())
-    if fn is None:
+    from .model import _REGISTRY
+    try:
+        return _REGISTRY[model.lower()].imf_fn
+    except KeyError:
         raise NotImplementedError(
-            f"jax salpyter supports {sorted(_MODEL_TO_FUNC)}; got {model!r}"
+            f"unknown model {model!r}; registered: {sorted(_REGISTRY)}"
         )
-    return fn
+
+
+def IMF_LIST():
+    """List of all registered model names (snapshot)."""
+    from .model import _REGISTRY
+    return list(_REGISTRY.keys())
+
+
+from .model import _REGISTRY as _MODEL_REGISTRY  # noqa: E402
+# Compatibility alias: salpyter.IMF_LIST used to be a list, not a function.
+IMF_LIST = list(_MODEL_REGISTRY.keys())
 
 
 __all__ = [
+    # Constants
     "CHABRIER_DEFAULT_PARAMS",
     "CHABRIER_SMOOTH_DEFAULT_PARAMS",
     "DEFAULT_IMF_PARAMS",
@@ -61,11 +96,22 @@ __all__ = [
     "DEFAULT_LOGMMIN",
     "DEFAULT_MODEL",
     "IMF_LIST",
+    # Legacy IMF callables (kept for direct use)
     "chabrier_exp_bounds_imf",
     "chabrier_imf",
     "chabrier_smooth_bounds_imf",
     "chabrier_smooth_exp_bounds_imf",
     "chabrier_smooth_imf",
+    "powerlaw_imf",
+    # New object-based API
+    "Cutoff",
+    "IMFModel",
+    "all_models",
+    "imf_model",
+    "piecewise",
+    "register",
+    "schechter",
+    # Functions
     "get_imf_function",
     "imf_default_bounds",
     "imf_default_params",

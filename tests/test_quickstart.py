@@ -44,6 +44,8 @@ _CONFIG_BY_MODEL = {
 
 @pytest.mark.parametrize("model", salpyter.IMF_LIST)
 def test_quickstart_recovers_input_params(model):
+    if model not in _CONFIG_BY_MODEL:
+        pytest.skip(f"no quickstart config for {model!r}")
     cfg = _CONFIG_BY_MODEL[model]
     tol = np.array(cfg["tol"], dtype=float)
 

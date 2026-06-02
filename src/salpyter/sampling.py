@@ -14,9 +14,8 @@ import numpy as np
 from .default_imf_params import (
     DEFAULT_IMF_PARAMS,
     DEFAULT_MODEL,
-    imf_default_bounds,
 )
-from .likelihood import _resolve_imf_func, imf_mostlikely_params
+from .likelihood import _resolve_imf_func, _resolve_model, imf_mostlikely_params
 
 
 def imf_samples(num_samples, imf, params=None, logmmin=-3, logmmax=2):
@@ -126,7 +125,8 @@ def imf_lnprob_samples(
     -------
     samples : np.ndarray, shape (num_samples_total, ndim)
     """
-    imf_fn = _resolve_imf_func(model)
+    resolved = _resolve_model(model)
+    imf_fn = resolved.imf_fn
 
     masses_arr = jnp.asarray(masses)
     logm = jnp.log10(masses_arr.ravel())
@@ -138,7 +138,10 @@ def imf_lnprob_samples(
     # outside) would also stall the sampler. A quadratic barrier outside the
     # box gives zero contribution inside and a strong restoring force outside,
     # so it behaves like a uniform prior in practice while staying gradient-safe.
-    bounds_arr = np.asarray(bounds if bounds is not None else imf_default_bounds(model))
+    if bounds is not None:
+        bounds_arr = np.asarray(bounds)
+    else:
+        bounds_arr = np.asarray([list(b) for b in resolved.default_bounds])
     lo = jnp.asarray(bounds_arr[:, 0], dtype=jnp.float64)
     hi = jnp.asarray(bounds_arr[:, 1], dtype=jnp.float64)
 

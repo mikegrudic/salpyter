@@ -346,3 +346,39 @@ def chabrier_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
         return _schechter_cutoff(lm, logmmin_p, logmmax_p)
 
     return shape(logm) * cutoff(logm) / _exp_bounds_norm(shape, cutoff, logmmin_p, logmmax_p)
+
+
+# --------------------------------------------------------------------------- #
+# Base components for piecewise composition.                                  #
+# --------------------------------------------------------------------------- #
+
+
+def powerlaw_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """Single power-law IMF in dN/d(log10 m) units.
+
+    With slope ``s``, the IMF value is ``m^s`` normalized to integrate to 1
+    over ``[logmmin, logmmax]``. The dN/dm convention has slope ``s - 1``;
+    Salpeter is ``s = -1.35`` here (corresponding to dN/dm ∝ m^-2.35).
+
+    Parameters
+    ----------
+    params : array_like, shape (1,)
+        ``[slope]`` in dN/d(log10 m) units.
+    """
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    slope = params[0]
+    mmin = 10.0**logmmin
+    mmax = 10.0**logmmax
+    # ∫ m^s d(log10 m) = (mmax^s - mmin^s) / (s * ln 10).
+    norm = (mmax**slope - mmin**slope) / (slope * _LN10)
+    return (10.0**logm) ** slope / norm
+
+
+def _schechter_cutoff_fn(logm, params):
+    """``exp(-m_min/m - m/m_max)``; params = [logmmin, logmmax]."""
+    return jnp.exp(-(10.0 ** (params[0] - logm)) - (10.0 ** (logm - params[1])))
+
+
+def _schechter_support_hint(params):
+    return params[0] - _EXP_NORM_MARGIN, params[1] + _EXP_NORM_MARGIN
