@@ -30,6 +30,29 @@ def _kroupa_true_params():
     return np.array([0.7, -0.3, -1.3, np.log10(0.08), np.log10(0.5), -2.0, 2.0], dtype=float)
 
 
+def test_ordered_piecewise_log_jacobian_matches_autodiff():
+    """The analytic log_jacobian_fn agrees with the autodiff log|det J|."""
+    import jax
+    import jax.numpy as jnp
+
+    m = piecewise(
+        salpyter.powerlaw_imf,
+        salpyter.powerlaw_imf,
+        salpyter.powerlaw_imf,
+        ordered=True,
+    )
+    assert m.log_jacobian_fn is not None
+
+    rng = np.random.default_rng(0)
+    # Try a few random unconstrained vectors.
+    for _ in range(5):
+        p_unc = jnp.asarray(rng.standard_normal(m.ndim))
+        analytic = float(m.log_jacobian_fn(p_unc))
+        J = jax.jacobian(m.from_unconstrained)(p_unc)
+        autodiff = float(jnp.log(jnp.abs(jnp.linalg.det(J))))
+        np.testing.assert_allclose(analytic, autodiff, atol=1e-10)
+
+
 def test_ordered_piecewise_round_trip():
     """to_unconstrained then from_unconstrained returns the input."""
     m = piecewise(

@@ -95,6 +95,10 @@ class IMFModel:
     bootstrap_fn: Optional[Callable[..., list[float]]] = field(default=None, repr=False)
     from_unconstrained: Optional[Callable[..., jnp.ndarray]] = field(default=None, repr=False)
     to_unconstrained: Optional[Callable[..., jnp.ndarray]] = field(default=None, repr=False)
+    # log |det J| of from_unconstrained at p_unc, evaluated in JAX.
+    # Required for unbiased NUTS sampling when from_unconstrained is non-identity:
+    # target density in unconstrained space is p(f(phi)) * |det df/dphi|.
+    log_jacobian_fn: Optional[Callable[..., jnp.ndarray]] = field(default=None, repr=False)
 
     def __post_init__(self):
         n = len(self.param_names)
@@ -377,8 +381,8 @@ def piecewise(
     # degeneracy, no need to constrain ordering via the prior bounds.
     from_unc = None
     to_unc = None
+    log_jac_fn = None
     if ordered and n_free_breaks >= 2:
-        n_total = n_model_params + n_free_breaks
         anchor_idx = n_model_params  # index of logmbreak_1 (absolute)
 
         def from_unconstrained(p_unc):
@@ -401,8 +405,23 @@ def piecewise(
             raw_deltas = jnp.log(jnp.maximum(diffs, 1e-300))
             return jnp.concatenate([head, anchor[None], raw_deltas])
 
+        def log_jacobian(p_unc):
+            """log |det df/dp_unc| for the delta reparameterization.
+
+            The Jacobian of (lb_1, log_d_1, log_d_2, ...) -> (lb_1, lb_2,
+            lb_3, ...) is lower triangular with diagonal entries
+            (1, exp(log_d_1), exp(log_d_2), ...) — so the determinant is
+            exp(sum(log_d_i)) and the log determinant is sum(log_d_i).
+            All other coordinates (the head and anchor) are identity, so
+            they contribute 0 to the log determinant.
+            """
+            p_unc = jnp.asarray(p_unc)
+            raw_deltas = p_unc[anchor_idx + 1 : anchor_idx + n_free_breaks]
+            return jnp.sum(raw_deltas)
+
         from_unc = from_unconstrained
         to_unc = to_unconstrained
+        log_jac_fn = log_jacobian
 
     return IMFModel(
         name=f"piecewise({','.join(m.name for m in models)})",
@@ -412,6 +431,7 @@ def piecewise(
         default_bounds=tuple(default_bounds),
         from_unconstrained=from_unc,
         to_unconstrained=to_unc,
+        log_jacobian_fn=log_jac_fn,
     )
 
 

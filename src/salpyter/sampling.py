@@ -154,11 +154,15 @@ def imf_lnprob_samples(
     # When the model declares a coordinate reparameterization (e.g.
     # piecewise(ordered=True)), NUTS samples in the *unconstrained* space and
     # we transform to the user-facing space (where ``param_names``,
-    # ``default_bounds``, and ``imf_fn`` all live) inside ``lnprob``. The same
-    # transform is applied to the output samples at the end so the user only
-    # ever sees the natural-scale representation.
+    # ``default_bounds``, and ``imf_fn`` all live) inside ``lnprob``. The
+    # change-of-variables formula requires adding ``log |det df/dp_unc|`` so
+    # NUTS targets the correct density; without it the chain samples from a
+    # subtly different distribution. The same transform is applied to the
+    # output samples at the end so the user only ever sees the natural-scale
+    # representation.
     from_unc = resolved.from_unconstrained
     to_unc = resolved.to_unconstrained
+    log_jac_fn = resolved.log_jacobian_fn
 
     def lnprob(p_sample):
         p = from_unc(p_sample) if from_unc is not None else p_sample
@@ -168,7 +172,8 @@ def imf_lnprob_samples(
         over = jax.nn.relu(p - hi)
         under = jax.nn.relu(lo - p)
         log_prior = -1e6 * jnp.sum(over * over + under * under)
-        return ll + log_prior
+        log_jac = log_jac_fn(p_sample) if log_jac_fn is not None else 0.0
+        return ll + log_prior + log_jac
 
     if p0 is None:
         sol = imf_mostlikely_params(masses, model, logmmin=lmin, logmmax=lmax)
