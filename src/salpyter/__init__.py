@@ -63,7 +63,7 @@ from .registry import (  # noqa: E402
     scalo,
     schechter,
 )
-from .likelihood import imf_lnprob, imf_mostlikely_params  # noqa: E402
+from .likelihood import imf_lnprob, imf_log_slope, imf_mostlikely_params  # noqa: E402
 from .sampling import imf_lnprob_samples, imf_samples  # noqa: E402
 
 
@@ -123,6 +123,7 @@ __all__ = [
     "imf_default_params",
     "imf_lnprob",
     "imf_lnprob_samples",
+    "imf_log_slope",
     "imf_mostlikely_params",
     "imf_samples",
 ]

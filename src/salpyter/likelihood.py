@@ -71,6 +71,53 @@ def imf_lnprob(params, masses, model=DEFAULT_MODEL, logmmin=None, logmmax=None):
     return jnp.sum(jnp.log(imf_val))
 
 
+def imf_log_slope(logm, params, model=DEFAULT_MODEL, logmmin=-jnp.inf, logmmax=4.0):
+    r"""Local logarithmic slope of the IMF, :math:`\Gamma = d \log_{10}\xi / d \log_{10} m`.
+
+    Computed via ``jax.grad`` of ``log(imf_fn(logm, params, ...))`` w.r.t. its
+    ``logm`` argument and vmapped across the input grid. Since the IMF
+    functions return :math:`dN/d\log_{10} m` (per-log10-mass), this returns
+    :math:`\Gamma` in the dN/dlog10m convention — Salpeter is :math:`-1.35`.
+
+    Parameters
+    ----------
+    logm : array_like
+        log10(mass) at which to evaluate the slope.
+    params : array_like
+        IMF parameters for ``model``.
+    model : str or IMFModel
+        Model name (registry lookup) or an ``IMFModel`` instance.
+    logmmin, logmmax : float
+        Mass-range bounds passed to the underlying IMF function. For models
+        that take their cutoffs from ``params`` (e.g. ``chabrier_smooth_bounds``)
+        these are ignored.
+
+    Returns
+    -------
+    jnp.ndarray
+        Same shape as ``logm``.
+
+    Notes
+    -----
+    For hard-bounded models the IMF is exactly zero outside the support, so
+    :math:`\Gamma` is undefined (or ``nan``) there — evaluate only at points
+    where the IMF is positive.
+    """
+    fn = _resolve_model(model).imf_fn
+    params_arr = jnp.asarray(params)
+    lmin_arr = jnp.asarray(logmmin)
+    lmax_arr = jnp.asarray(logmmax)
+
+    def _scalar_log_imf(x):
+        return jnp.log(fn(jnp.atleast_1d(x), params_arr, lmin_arr, lmax_arr)[0])
+
+    # d ln(imf) / d log10(m) == d log10(imf) / d log10(m) * ln(10), so divide
+    # the autodiff result by ln(10) to get the log10/log10 slope.
+    logm_arr = jnp.atleast_1d(jnp.asarray(logm))
+    slope_ln = jax.vmap(jax.grad(_scalar_log_imf))(logm_arr)
+    return slope_ln / jnp.log(10.0)
+
+
 def imf_mostlikely_params(
     masses,
     model=DEFAULT_MODEL,
