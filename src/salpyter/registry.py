@@ -1,12 +1,17 @@
-"""Standalone :class:`~salpyter.model.Cutoff` declarations.
+"""Standalone :class:`~salpyter.model.Cutoff` declarations and composed models.
 
-The IMF models themselves are now registered inline in ``imfs.py`` via
-``@imf_model`` decorators. This module is left only for ``Cutoff`` instances
-(which are not models and so cannot use the same decorator).
+The base IMF shapes (``lognormal``, ``powerlaw``, ``chabrier_smooth``, etc.) are
+registered inline in ``imfs.py`` via ``@imf_model`` decorators. This module
+constructs the conventional astronomical names (Chabrier, Salpeter, Kroupa,
+Scalo) as compositions of those base shapes, plus the ``schechter`` ``Cutoff``
+that can't use the model decorator.
 """
 
+import dataclasses
+
 from . import imfs
-from .model import Cutoff, piecewise, register
+from .default_imf_params import DEFAULT_IMF_PARAMS, DEFAULT_IMF_PARAMS_BOUNDS
+from .model import Cutoff, _REGISTRY, piecewise, register
 
 # Schechter cutoff for ``model * schechter`` composition.
 schechter = Cutoff(
@@ -22,19 +27,39 @@ schechter = Cutoff(
 # Backward-compat aliases — some downstream code (and the previous version of
 # ``__init__.py``) imported the IMFModel instances from registry.py under their
 # bare names. Re-export them from the registry to preserve those imports.
-from .model import _REGISTRY  # noqa: E402
 
 chabrier_smooth = _REGISTRY["chabrier_smooth"]
-chabrier = _REGISTRY["chabrier"]
 chabrier_smooth_bounds = _REGISTRY["chabrier_smooth_bounds"]
 chabrier_smooth_exp_bounds = _REGISTRY["chabrier_smooth_exp_bounds"]
 chabrier_exp_bounds = _REGISTRY["chabrier_exp_bounds"]
 powerlaw = _REGISTRY["powerlaw"]
+lognormal = _REGISTRY["lognormal"]
 
 
 # ---------------------------------------------------------------------------
 # Composed models registered under conventional astronomical names.
 # ---------------------------------------------------------------------------
+
+# Chabrier (2003/2005): lognormal at low mass joined to a single power-law at
+# high mass with C0 continuity at a free break. Expressed as
+# ``piecewise(lognormal, powerlaw)`` — the cascading-scale rule inside
+# ``piecewise`` enforces the same value-matching at ``logmbreak_1`` that the
+# old hand-implemented ``chabrier_imf`` did with ``normal_at_break * (m/mbreak)^alpha``.
+# Bootstrap, default params, and default bounds are pinned to the values used
+# by the previous hand-implemented model so quickstart tests and the
+# IMF_analysis_jax.py driver behave identically (param order is also unchanged:
+# ``(logm0, logsigma, slope, logmbreak_1)`` aligns positionally with the old
+# ``(logm0, logsigma, alpha, logmbreak)``).
+chabrier = register(
+    dataclasses.replace(
+        piecewise(lognormal, powerlaw),
+        name="chabrier",
+        bootstrap_fn=imfs._bootstrap_chabrier,
+        default_params=tuple(DEFAULT_IMF_PARAMS["chabrier"]),
+        default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier"]),
+    ),
+    "chabrier",
+)
 
 # Salpeter (1955): a single power-law segment. ``salpeter`` is just the
 # already-registered ``powerlaw`` model under a more conventional name. The

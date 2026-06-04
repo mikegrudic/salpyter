@@ -148,70 +148,6 @@ def chabrier_smooth_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
 
 
 @imf_model(
-    name="chabrier",
-    param_names=("logm0", "logsigma", "alpha", "logmbreak"),
-    default_params=tuple(DEFAULT_IMF_PARAMS["chabrier"]),
-    default_bounds=tuple(tuple(b) for b in DEFAULT_IMF_PARAMS_BOUNDS["chabrier"]),
-    bootstrap_fn=_bootstrap_chabrier,
-)
-def chabrier_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
-    """Chabrier IMF with a free high-mass break (4 parameters).
-
-    Same lognormal-plus-powerlaw form as ``chabrier_smooth_imf`` but the break
-    point ``logmbreak`` is sampled independently rather than derived from the
-    smooth-derivative condition.
-
-    Parameters
-    ----------
-    params : array_like, shape (4,)
-        ``[logm0, logsigma, alpha, logmbreak]``.
-    """
-    logm = jnp.asarray(logm)
-    params = jnp.asarray(params)
-    logm0 = params[0]
-    logsigma = params[1]
-    alpha = params[2]
-    logmbreak = params[3]
-
-    sigma = jnp.exp(logsigma)
-    inv_sigma = 1.0 / sigma
-    mbreak = 10.0**logmbreak
-
-    z = (logm - logm0) * inv_sigma
-    lognormal = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
-
-    z_break = (logmbreak - logm0) * inv_sigma
-    normal_at_break = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z_break * z_break)
-
-    m = 10.0**logm
-    powerlaw = normal_at_break * (m / mbreak) ** alpha
-
-    imf_pre = jnp.where(logm > logmbreak, powerlaw, lognormal)
-
-    upper_cap = jnp.minimum(logmmax, logmbreak)
-    X1 = (logmmin - logm0) * inv_sigma
-    X2 = (upper_cap - logm0) * inv_sigma
-    lognormal_norm = jnp.where(
-        logmmin < logmbreak,
-        0.5 * (erf(X2 / _SQRT2) - erf(X1 / _SQRT2)),
-        0.0,
-    )
-
-    mmin = 10.0**logmmin
-    mmax = 10.0**logmmax
-    xmin_pl = jnp.maximum(mmin, mbreak)
-    pl_integral = (mmax**alpha - xmin_pl**alpha) / alpha
-    powerlaw_norm = jnp.where(
-        logmmax > logmbreak,
-        normal_at_break * mbreak ** (-alpha) * pl_integral / _LN10,
-        0.0,
-    )
-    norm = lognormal_norm + powerlaw_norm
-
-    return imf_pre / norm
-
-
-@imf_model(
     name="chabrier_smooth_bounds",
     param_names=("logm0", "logsigma", "alpha", "logmmin", "logmmax"),
     default_params=tuple(DEFAULT_IMF_PARAMS["chabrier_smooth_bounds"]),
@@ -435,6 +371,44 @@ def chabrier_exp_bounds_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
 # --------------------------------------------------------------------------- #
 # Base components for piecewise composition.                                  #
 # --------------------------------------------------------------------------- #
+
+
+@imf_model(
+    name="lognormal",
+    param_names=("logm0", "logsigma"),
+    default_params=(float(np.log10(0.25)), float(np.log(0.55))),
+    # logm0 spans (-4, 4) so any astrophysically plausible peak (1e-4 to 1e4 Msun)
+    # is inside the bound — matches the cutoff-bound convention used by
+    # chabrier_smooth_bounds and friends. logsigma stays at (-2, 2), giving widths
+    # in [exp(-2), exp(2)] ≈ [0.14, 7.4] dex.
+    default_bounds=((-4.0, 4.0), (-2.0, 2.0)),
+)
+def lognormal_imf(logm, params, logmmin=-jnp.inf, logmmax=4.0):
+    """Lognormal IMF in dN/d(log10 m) units.
+
+    A Gaussian in log10(m) with peak at ``logm0`` and width ``exp(logsigma)``
+    (in log10-mass units), normalized to integrate to 1 over
+    ``[logmmin, logmmax]``. This is the standalone shape that sits below the
+    high-mass power-law in the Chabrier composition.
+
+    Parameters
+    ----------
+    params : array_like, shape (2,)
+        ``[logm0, logsigma]`` — peak log10(mass) and log of the (log10-units)
+        width.
+    """
+    logm = jnp.asarray(logm)
+    params = jnp.asarray(params)
+    logm0 = params[0]
+    logsigma = params[1]
+    sigma = jnp.exp(logsigma)
+    inv_sigma = 1.0 / sigma
+    z = (logm - logm0) * inv_sigma
+    shape = _INV_SQRT_2PI * inv_sigma * jnp.exp(-0.5 * z * z)
+    X1 = (logmmin - logm0) * inv_sigma
+    X2 = (logmmax - logm0) * inv_sigma
+    norm = 0.5 * (erf(X2 / _SQRT2) - erf(X1 / _SQRT2))
+    return shape / norm
 
 
 @imf_model(

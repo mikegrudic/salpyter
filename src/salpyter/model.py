@@ -150,12 +150,27 @@ class IMFModel:
             w = jax.nn.sigmoid(p[nA + nB])
             return w * self.imf_fn(logm, pA, logmmin, logmmax) + (1 - w) * other.imf_fn(logm, pB, logmmin, logmmax)
 
+        # Auto-suffix duplicate component param names (same convention as
+        # piecewise): "logm0" appearing in both summands becomes
+        # "logm0_1" / "logm0_2". Unique names pass through.
+        from collections import Counter
+        _name_counts = Counter(self.param_names + other.param_names)
+
+        def _dedupe(names, seg_idx):
+            return tuple(
+                f"{n}_{seg_idx}" if _name_counts[n] > 1 else n for n in names
+            )
+
+        # logit_w bound of ±log(999) ≈ ±6.907 lets either component's weight
+        # range over [1/1000, 999/1000]. Wider than the usual (-5, 5) so the
+        # optimizer can fully shut off either mixture leg if the data wants it.
+        _logit_w_bound = float(np.log(999.0))
         return IMFModel(
             name=f"({self.name}+{other.name})",
             imf_fn=imf_fn,
-            param_names=self.param_names + other.param_names + ("logit_w",),
+            param_names=_dedupe(self.param_names, 1) + _dedupe(other.param_names, 2) + ("logit_w",),
             default_params=self.default_params + other.default_params + (0.0,),
-            default_bounds=self.default_bounds + other.default_bounds + ((-5.0, 5.0),),
+            default_bounds=self.default_bounds + other.default_bounds + ((-_logit_w_bound, _logit_w_bound),),
         )
 
     def __mul__(self, cutoff: "Cutoff") -> "IMFModel":

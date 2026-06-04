@@ -34,10 +34,10 @@ from .default_imf_params import (  # noqa: E402
 )
 from .imfs import (  # noqa: E402
     chabrier_exp_bounds_imf,
-    chabrier_imf,
     chabrier_smooth_bounds_imf,
     chabrier_smooth_exp_bounds_imf,
     chabrier_smooth_imf,
+    lognormal_imf,
     powerlaw_imf,
 )
 from .model import (  # noqa: E402
@@ -65,17 +65,22 @@ from .registry import (  # noqa: E402
 )
 from .likelihood import imf_lnprob, imf_log_slope, imf_mostlikely_params  # noqa: E402
 from .sampling import imf_lnprob_samples, imf_samples  # noqa: E402
+from .evidence import (  # noqa: E402
+    imf_log_evidence,
+    imf_log_evidence_bridge,
+    imf_log_evidence_laplace,
+)
 
 
 def get_imf_function(model: str):
-    """Return the JAX-callable IMF function for ``model``."""
-    from .model import _REGISTRY
-    try:
-        return _REGISTRY[model.lower()].imf_fn
-    except KeyError:
-        raise NotImplementedError(
-            f"unknown model {model!r}; registered: {sorted(_REGISTRY)}"
-        )
+    """Return the JAX-callable IMF function for ``model``.
+
+    Goes through :func:`salpyter.likelihood._resolve_model`, which knows
+    about the auto-``_bounds`` convention (so ``"kroupa_bounds"`` etc. work
+    even though they aren't hand-registered).
+    """
+    from .likelihood import _resolve_model
+    return _resolve_model(model).imf_fn
 
 
 def IMF_LIST():
@@ -101,10 +106,10 @@ __all__ = [
     "IMF_LIST",
     # Legacy IMF callables (kept for direct use)
     "chabrier_exp_bounds_imf",
-    "chabrier_imf",
     "chabrier_smooth_bounds_imf",
     "chabrier_smooth_exp_bounds_imf",
     "chabrier_smooth_imf",
+    "lognormal_imf",
     "powerlaw_imf",
     # New object-based API
     "Cutoff",
@@ -123,6 +128,9 @@ __all__ = [
     "imf_default_params",
     "imf_lnprob",
     "imf_lnprob_samples",
+    "imf_log_evidence",
+    "imf_log_evidence_bridge",
+    "imf_log_evidence_laplace",
     "imf_log_slope",
     "imf_mostlikely_params",
     "imf_samples",
